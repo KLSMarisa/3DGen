@@ -27,7 +27,6 @@ class Flux_Trainer(pl.LightningModule):
         self.pipeline.to('cuda')
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
-        self.pipeline.frozen_parameters()
         for block in self.transformer.transformer_blocks:
             block.ortho_attn.requires_grad_(True)
         #self.transformer.transformer_blocks[0].requires_grad_(True)
@@ -135,6 +134,7 @@ class Flux_Trainer(pl.LightningModule):
                 negative_prompt_embeds is not None and negative_pooled_prompt_embeds is not None
             ) 
             do_true_cfg = true_cfg_scale > 1 and has_neg_prompt
+
             (
                 prompt_embeds,
                 pooled_prompt_embeds,
@@ -186,7 +186,7 @@ class Flux_Trainer(pl.LightningModule):
 
             # 4. Prepare latent variables
             num_channels_latents = self.transformer.config.in_channels // 4
-            _, image_latents, _, _ = self.pipeline.prepare_latents(
+            _, image_latents, latent_ids, image_ids = self.pipeline.prepare_latents(
                 image,
                 batch_size * num_images_per_prompt,
                 num_channels_latents,
@@ -196,7 +196,7 @@ class Flux_Trainer(pl.LightningModule):
                 device
             )
             
-            _,gt_images_latents,latent_ids,image_ids = self.pipeline.prepare_latents(
+            _,gt_images_latents,_,_ = self.pipeline.prepare_latents(
                 gt_images,
                 batch_size*3,
                 num_channels_latents,
@@ -266,8 +266,10 @@ class Flux_Trainer(pl.LightningModule):
             latents = t_reshaped * gt_images_latents + (1 - t_reshaped) * noise
             target_vector = gt_images_latents - noise
             pooled_prompt_embeds = expand_3d(pooled_prompt_embeds)
-            prompt_embeds = expand_3d(prompt_embeds)
             image_latents = expand_3d(image_latents) if image_latents is not None else None
+            #text_ids = expand_3d(text_ids)
+            prompt_embeds = expand_3d(prompt_embeds)
+            #latent_ids = expand_3d(latent_ids) if image_ids is not None else None
             if image_embeds is not None:
                 self.pipeline._joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
             latent_model_input = latents
@@ -276,6 +278,8 @@ class Flux_Trainer(pl.LightningModule):
             
             print(latents.shape)
             print(latent_model_input.shape)
+            print('text ids shape:',text_ids.shape)
+            print('latent ids shape:',latent_ids.shape)
             
         predict_vector = self.transformer(
             hidden_states=latent_model_input,

@@ -42,7 +42,8 @@ class OAFluxTransformerBlock(FluxTransformerBlock):
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
             encoder_hidden_states, emb=temb
         )
-        
+        print('norm_hidden_states.shape:', norm_hidden_states.shape)
+        print('norm_encoder_hidden_states.shape:', norm_encoder_hidden_states.shape)
         # --- 2. 执行标准注意力 ---
         # 这一步同时计算图像的自注意力和与文本的交叉注意力
         attention_outputs = self.attn(

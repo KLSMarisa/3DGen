@@ -25,7 +25,7 @@ PREFERRED_KONTEXT_RESOLUTIONS = [
     (832, 1248),
     (880, 1184),
     (944, 1104),
-    (512,  512),
+    (256,  256),
     (1024, 1024),
     (1104, 944),
     (1184, 880),
@@ -126,6 +126,69 @@ def retrieve_latents(
 
 
 class OAFluxKontextPipeline2(FluxKontextPipeline):
+    def prepare_latents(
+        self,
+        image: Optional[torch.Tensor],
+        batch_size: int,
+        num_channels_latents: int,
+        height: int,
+        width: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
+        latents: Optional[torch.Tensor] = None,
+    ):
+        if isinstance(generator, list) and len(generator) != batch_size:
+            raise ValueError(
+                f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
+                f" size of {batch_size}. Make sure the batch size matches the length of the generators."
+            )
+
+        # VAE applies 8x compression on images but we must also account for packing which requires
+        # latent height and width to be divisible by 2.
+        height = 2 * (int(height) // (self.vae_scale_factor * 2))
+        width = 2 * (int(width) // (self.vae_scale_factor * 2))
+        shape = (batch_size, num_channels_latents, height, width)
+        print('enter prepare_latents,height:', height, 'width:', width, 'shape:', shape)
+        image_latents = image_ids = None
+        if image is not None:
+            image = image.to(device=device, dtype=dtype)
+            if image.shape[1] != self.latent_channels:
+                image_latents = self._encode_vae_image(image=image, generator=generator)
+            else:
+                image_latents = image
+            if batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] == 0:
+                # expand init_latents for batch_size
+                additional_image_per_prompt = batch_size // image_latents.shape[0]
+                image_latents = torch.cat([image_latents] * additional_image_per_prompt, dim=0)
+            elif batch_size > image_latents.shape[0] and batch_size % image_latents.shape[0] != 0:
+                raise ValueError(
+                    f"Cannot duplicate `image` of batch size {image_latents.shape[0]} to {batch_size} text prompts."
+                )
+            else:
+                image_latents = torch.cat([image_latents], dim=0)
+
+            image_latent_height, image_latent_width = image_latents.shape[2:]
+            image_latents = self._pack_latents(
+                image_latents, batch_size, num_channels_latents, image_latent_height, image_latent_width
+            )
+            image_ids = self._prepare_latent_image_ids(
+                batch_size, image_latent_height // 2, image_latent_width // 2, device, dtype
+            )
+            print('image_latents.shape:', image_latent_width//2,' ',image_latent_height//2)
+            # image ids are the same as latent ids with the first dimension set to 1 instead of 0
+            image_ids[..., 0] = 1
+
+            latent_ids = self._prepare_latent_image_ids(batch_size, image_latent_width//2, image_latent_height//2, device, dtype)
+        else: latent_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+        if latents is None:
+            latents = torch.randn(shape, device=device, dtype=dtype)
+            latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
+        else:
+            latents = latents.to(device=device, dtype=dtype)
+
+        return latents, image_latents, latent_ids, image_ids
+    
     @torch.no_grad()
     def __call__(
         self,
@@ -566,7 +629,12 @@ def get_pipeline(Train = False):
     with accelerate.init_empty_weights():
         oa_transformer = OAFluxTransformer2DModel.OAFluxTransformer2DModel(**config)
     print('loading transformer weights...')
-    oa_transformer =oa_transformer.from_pretrained('/mnt/hdd3/linzhuohang/3DGen/oa_transfomer',device_map="cuda",torch_dtype=torch.bfloat16,low_cpu_mem_usage=True)
+    oa_transformer =oa_transformer.from_pretrained('/mnt/hdd3/linzhuohang/3DGen/oa_transfomer',
+                                                   device_map="cuda",
+                                                   torch_dtype=torch.bfloat16,
+                                                   num_image_patches=1408,            # <--- 添加此行
+                                                    ignore_mismatched_sizes=True,       # <--- 添加此行
+                                                   low_cpu_mem_usage=True)
     # 初始化DeepSpeed引擎，使用简化的配置
     print('deepspeed initializing...')
     if not Train:
