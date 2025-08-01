@@ -1,2 +1,1 @@
-# text-to-VA
-video and audio generation from text
+Under Construction
