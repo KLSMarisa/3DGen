@@ -27,9 +27,10 @@ class Flux_Trainer(pl.LightningModule):
         self.pipeline.to('cuda')
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
-        #self.pipeline.frozen_parameters()
+        self.pipeline.frozen_parameters()
         for block in self.transformer.transformer_blocks:
             block.ortho_attn.requires_grad_(True)
+        #self.transformer.transformer_blocks[0].requires_grad_(True)
         self.save_hyperparameters()
         self.scheduler = self.pipeline.scheduler
 
@@ -165,6 +166,7 @@ class Flux_Trainer(pl.LightningModule):
                 )
 
             # 3. Preprocess image
+            gt_images =  rearrange(gt_images,'b n c h w -> (b n) c h w')
             if image is not None and not (isinstance(image, torch.Tensor) and image.size(1) == self.pipeline.latent_channels):
                 img = image[0] if isinstance(image, list) else image
                 image_height, image_width = self.pipeline.image_processor.get_default_height_width(img)
@@ -193,7 +195,7 @@ class Flux_Trainer(pl.LightningModule):
                 prompt_embeds.dtype,
                 device
             )
-            gt_images =  rearrange(gt_images,'b n c h w -> (b n) c h w')
+            
             _,gt_images_latents,latent_ids,image_ids = self.pipeline.prepare_latents(
                 gt_images,
                 batch_size*3,

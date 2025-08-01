@@ -4,9 +4,7 @@ import torch
 import torch.nn as nn
 import math
 import deepspeed
-
-# 假设您的 OrthogonalAttentionModule 模块已在别处定义
-# from your_project.modules import OrthogonalAttentionModule 
+from typing import Any, Dict, Optional, Tuple, Union
 
 class OAFluxTransformerBlock(FluxTransformerBlock):
     def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int, **kwargs):
@@ -25,18 +23,21 @@ class OAFluxTransformerBlock(FluxTransformerBlock):
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        **kwargs):
-        #return deepspeed.checkpointing.checkpoint(self._forward, hidden_states,encoder_hidden_states,temb,**kwargs).requires_grad_(True)
-        return self._forward(hidden_states, encoder_hidden_states, temb, **kwargs)
+        image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        joint_attention_kwargs: Optional[Dict[str, Any]] = None):
+        encoder_hidden_states,hidden_states =  deepspeed.checkpointing.checkpoint(self._forward, hidden_states,encoder_hidden_states,temb,image_rotary_emb,joint_attention_kwargs)
+        #encoder_hidden_states,hidden_states =  deepspeed.checkpointing.checkpoint(super().forward, hidden_states,encoder_hidden_states,temb,image_rotary_emb,joint_attention_kwargs)
+        return encoder_hidden_states.requires_grad_(True), hidden_states.requires_grad_(True)
     def _forward(
         self,
         hidden_states: torch.Tensor,
         encoder_hidden_states: torch.Tensor,
         temb: torch.Tensor,
-        **kwargs # 使用 **kwargs 捕获并传递所有其他参数
+        image_rotary_emb: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        joint_attention_kwargs: Optional[Dict[str, Any]] = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         
-        # --- 1. 对两个流进行 AdaLayerNormZero (与原生代码一致) ---
+        # --- 1. 对两个流进行 AdaLayerNormZero ---
         norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
         norm_encoder_hidden_states, c_gate_msa, c_shift_mlp, c_scale_mlp, c_gate_mlp = self.norm1_context(
             encoder_hidden_states, emb=temb
@@ -47,7 +48,8 @@ class OAFluxTransformerBlock(FluxTransformerBlock):
         attention_outputs = self.attn(
             hidden_states=norm_hidden_states,
             encoder_hidden_states=norm_encoder_hidden_states,
-            **kwargs, # 传递 image_rotary_emb 等参数
+            image_rotary_emb=image_rotary_emb,
+            joint_attention_kwargs= joint_attention_kwargs # 传递 image_rotary_emb 等参数
         )
         
         # 分离出图像和文本的注意力结果
@@ -78,9 +80,20 @@ class OAFluxTransformerBlock(FluxTransformerBlock):
         ortho_output_seq = ortho_output_spatial.reshape(B_times_N, seq_len, C)
 
         # --- 4. 完成 hidden_states (图像流) 的更新 ---
-        # a. 添加标准注意力的残差
+        ## a. 添加标准注意力的残差
+        #hs_after_attn = hidden_states + gate_msa.unsqueeze(1) * attn_output
+        ## b. 以 out-of-place 方式添加我们的正交注意力的残差
+        ##    首先，分离出需要修改的部分和不需要修改的部分
+        #part_to_update = hs_after_attn[:, :latent_size*latent_size, :]
+        #part_to_keep = hs_after_attn[:, latent_size*latent_size:, :]
+        ##    对需要修改的部分进行计算
+        #part_updated = part_to_update + ortho_output_seq
+        ##    将修改后的部分和未修改的部分重新拼接成一个新张量
+        #hidden_states = torch.cat([part_updated, part_to_keep], dim=1)
+        # --- 4. 完成 hidden_states (图像流) 的更新 ---
+
+        
         hidden_states = hidden_states + gate_msa.unsqueeze(1) * attn_output
-        # b. 再添加我们的正交注意力的残差
         hidden_states[:,:latent_size*latent_size,:] = hidden_states[:,:latent_size*latent_size,:] + ortho_output_seq
         
         # c. 执行前馈网络
@@ -90,7 +103,6 @@ class OAFluxTransformerBlock(FluxTransformerBlock):
         hidden_states = hidden_states + gate_mlp.unsqueeze(1) * ff_output
 
         # --- 5. 完成 encoder_hidden_states (文本流) 的更新 ---
-        # (这部分逻辑与原生代码完全相同，直接复用)
         encoder_hidden_states = encoder_hidden_states + c_gate_msa.unsqueeze(1) * context_attn_output
         norm_encoder_hidden_states = self.norm2_context(encoder_hidden_states)
         norm_encoder_hidden_states = norm_encoder_hidden_states * (1 + c_scale_mlp[:, None]) + c_shift_mlp[:, None]
