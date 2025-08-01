@@ -1,0 +1,1 @@
+python main.py --exp flux --config configs/base.yaml --mode train --batch_size 1 --name flux_training --savedir '/home/linzhuohang/3DGen/ckpt'

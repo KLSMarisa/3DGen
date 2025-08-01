@@ -1,0 +1,10 @@
+# CUDA_LAUNCH_BLOCKING=1 
+# python main.py --nodes 1 --devices 8 --stage 1 --name spatial_finetune --dataset text2obj --batch_size 4
+# Xvfb :99 -screen 0 1024x768x24 &
+# export DISPLAY=:99 &
+python -m torch.distributed.launch   --nproc_per_node 6 --use_env main.py --stage 3 --config configs/renderer.yaml --exp renderer --name gt23d_view_num --savedir '/mnt/hdd2/caixiao/deeplearning/ckpt/3dbench/suppl/gt23d_view_num_32_dual_orbit' --dataset obj2render --batch_size 2 --nodes 1 --devices 6 #--resume '/mnt/hdd1/caixiao/deeplearning/ckpt/3dgen/qilian_v1_final_renderer/checkpoints/qilian_v1-step=8200.ckpt'
+# python -m torch.distributed.launch   --nproc_per_node 8  --use_env main.py --stage 3 --config configs/base.yaml --exp diffusion --name TPL --savedir '/mnt/hdd1/caixiao/deeplearning/ckpt/3dgen/TPL_finetune' --dataset text2obj --batch_size 4 --nodes 1 --devices 8 --resume '/mnt/hdd1/caixiao/deeplearning/ckpt/3dgen/TPL_finetune/checkpoints/TPL-step=13000.ckpt'
+# python -m torch.distributed.launch   --nproc_per_node 1  --use_env main.py --stage 3 --config configs/base.yaml --exp diffusion --name TPL --savedir '/mnt/hdd2/caixiao/deeplearning/ckpt/3dbench/objaverse_finetune' --dataset text2obj --batch_size 4 --nodes 1 --devices 1 #--resume '/mnt/hdd1/caixiao/deeplearning/ckpt/3dgen/TPL_finetune/checkpoints/TPL-step=13000.ckpt'
+# python -m torch.distributed.launch   --nproc_per_node 8  --use_env main.py --stage 3 --config configs/base.yaml --exp diffusion --name TPL --savedir '/mnt/hdd2/caixiao/deeplearning/ckpt/3dbench/suppl/gt23d_finetune' --dataset text2obj --batch_size 4 --nodes 1 --devices 8 #--resume '/mnt/hdd1/caixiao/deeplearning/ckpt/3dgen/TPL_finetune/checkpoints/TPL-step=13000.ckpt'
+# setsid nohup python -m torch.distributed.launch   --nproc_per_node 8 --use_env main.py --stage 1 --name stage1 --dataset text2obj --batch_size 4 --nodes 1  > output.log 2>&1
+# python main.py --stage 3 --exp diffusion --name stage3_sd --config configs/base.yaml --savedir '/mnt/hdd1/caixiao/3dgen_qilian' --dataset text2render --batch_size 1 --nodes 1 --devices 1 

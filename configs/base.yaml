@@ -1,0 +1,63 @@
+gradient_accumulation_steps: 1
+max_grad_norm: 1.0
+num_train_epochs: -1
+
+
+dataset:
+#  video_size: [16, 3, 384, 704] # [16, 3, 320, 768] [16, 3, 384, 704]
+#  video_fps: 8
+#  p_uncond: 0.2
+
+  text2obj:
+    # data_dir: '/mnt/hdd1/caixiao/data/pv_views_64_1'
+    # data_dir: '/mnt/hdd1/data/select_data1.json'
+    #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/objaverse_qilian_WB.json'
+    # data_dir: '/home/caixiao/projects/3DGen/data/3DTopia-objaverse-caption-361k.json'
+    # data_dir: '/home/caixiao/projects/3d_lib/img/filter_data_v2.json'
+    # data_dir: '/mnt/hdd1/caixiao/3dgen/nerf/white_test2/part5.json'
+    data_dir : '/home/linzhuohang/3DGen/configs/select_data2.json'
+    # view_num: 16
+
+  text2render:
+    # data_dir: '/mnt/hdd1/caixiao/data/pv_views_64_1'
+    data_dir: '/mnt/hdd1/data/select_data1.json'
+    # data_dir: '/home/caixiao/projects/3DGen/data/filtered_sd_scores.json'
+    # data_dir: '/home/caixiao/projects/3d_lib/img/filter_data_v2.json'
+    # data_dir: '/mnt/hdd1/caixiao/3dgen/nerf/white_test2/part5.json'
+    # view_num: 16
+  
+  text2scene:
+    data_dir: '/mnt/nfs/caixiao/datasets/blendedMVS/select'
+    view_num: 16
+
+ddconfig:
+  ema: False
+  lpips: true
+  diff_latent_res_H: 64 # 88 40
+  diff_latent_res_W: 64 # 48 96
+
+  base_learning_rate: 5.0e-4
+  # ema: true
+  # lpips: true
+  # base_learning_rate: 5.0e-4
+  precrop_frac: 0.5
+  precrop_iters: 1000
+  N_rand: 1024
+  # diff_latent_res_H: 64 # 88 40
+  # diff_latent_res_W: 64 # 48 96
+  plane_C: 4
+  
+  # base_learning_rate: 1.0e-4
+  neural_rendering_resolution: 64
+  clamp_mode: 'softplus'
+  disparity_space_sampling: False
+  depth_resolution: 64
+  depth_resolution_importance: 64  #64
+  ray_start: 'auto'
+  ray_end: 'auto'
+  # ray_start: 0.1
+  # ray_end: 2.6
+  box_warp: 1.9
+  white_back: False
+  avg_camera_radius: 1.7
+  avg_camera_pivot: [0, 0, 0]
