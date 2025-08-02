@@ -263,13 +263,14 @@ class Flux_Trainer(pl.LightningModule):
             noise = torch.randn_like(gt_images_latents).to(device)
             t = torch.randint(0, self.scheduler.num_train_timesteps, (batch_size,), dtype=torch.int64, device=self.device)
             t_reshaped = t.view(batch_size, *([1] * (gt_images_latents.dim() - 1))).to(device)
+            t_reshaped = expand_3d(t_reshaped)
             latents = t_reshaped * gt_images_latents + (1 - t_reshaped) * noise
             target_vector = gt_images_latents - noise
             pooled_prompt_embeds = expand_3d(pooled_prompt_embeds)
             image_latents = expand_3d(image_latents) if image_latents is not None else None
-            #text_ids = expand_3d(text_ids)
+            #text_ids = text_ids.to(image_latents.dtype)
             prompt_embeds = expand_3d(prompt_embeds)
-            #latent_ids = expand_3d(latent_ids) if image_ids is not None else None
+            #latent_ids = latent_ids.to(image_latents.dtype) if image_ids is not None else None
             if image_embeds is not None:
                 self.pipeline._joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
             latent_model_input = latents
