@@ -49,7 +49,7 @@ class OrthogonalAttentionModule(nn.Module):
         q_xy_y = q_xy.permute(0, 3, 1, 2, 4).reshape(B * S, self.num_heads, S, self.head_dim)
         k_yz_y = k_yz.permute(0, 2, 1, 3, 4).reshape(B * S, self.num_heads, S, self.head_dim)
         v_yz_y = v_yz.permute(0, 2, 1, 3, 4).reshape(B * S, self.num_heads, S, self.head_dim)
-        oay_on_pxy = F.scaled_dot_product_attention(q_xy_y, k_yz_y, v_yz_y)
+        oay_on_pxy = F.scaled_dot_product_attention(q_xy_y, k_yz_y, v_yz_y)  ##modified
         oay_on_pxy = oay_on_pxy.reshape(B, S, self.num_heads, S, self.head_dim).permute(0, 2, 3, 1, 4)
 
         # ... 对称地计算其他平面的分量 ...

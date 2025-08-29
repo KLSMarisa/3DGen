@@ -415,12 +415,12 @@ def UnifiedDataset(config):
 def Unified_val_Dataset(config):
     _datasets = []
 
-    datasets = config.datasets.split(',')
+    datasets = config.val_datasets.split(',')
     assert len(datasets) > 0, "No dataset specified"
     for dataset in datasets:
-        if dataset == 'text2obj':
+        if dataset == 'text2obj_val':
             _datasets.append(load_text2obj_dataset(
-                data_dir=config.dataset.text2obj.data_dir,
+                data_dir=config.dataset.text2obj_val.data_dir,
                 # view_num=config.dataset.text2obj.view_num
             ))
         elif dataset == 'text2scene':
@@ -456,7 +456,6 @@ def create_dataloader(config):
         num_workers      =   10,
         collate_fn       =   None,
         pin_memory       =   False,
-        timeout=10,
     )
     return dataloader
 
@@ -471,7 +470,6 @@ def create_val_dataloader(config):
         num_workers      =   10,
         collate_fn       =   None,
         pin_memory       =   False,
-        timeout=10,
     )
     return dataloader
 

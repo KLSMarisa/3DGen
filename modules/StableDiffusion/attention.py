@@ -4,10 +4,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn, einsum
 from einops import rearrange, repeat
-from typing import Optional, Any
+from typing import Optional, Any, Tuple, Union
 import numpy as np
 from .util import checkpoint, timestep_embedding
-
 
 try:
     import xformers
@@ -275,6 +274,50 @@ class MemoryEfficientCrossAttention(nn.Module):
         return self.to_out(out)
 
 
+def apply_rotary_emb(
+    x: torch.Tensor,
+    freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor]],
+    use_real: bool = True,
+    use_real_unbind_dim: int = -1,
+    sequence_dim: int = 2,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
+    to the given query or key 'x' tensors using the provided frequency tensor 'freqs_cis'. The input tensors are
+    reshaped as complex numbers, and the frequency tensor is reshaped for broadcasting compatibility. The resulting
+    tensors contain rotary embeddings and are returned as real tensors.
+
+    Args:
+        x (`torch.Tensor`):
+            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
+        freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
+    """
+    if use_real:
+        cos, sin = freqs_cis  # [S, D]
+        cos = cos[None, :,None, None, :]
+        sin = sin[None, :,None, None, :]
+
+        cos, sin = cos.to(x.device), sin.to(x.device)
+
+            # Used for flux, cogvideox, hunyuan-dit
+        x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, H, S, D//2]
+        x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(-2)
+
+        #print('x shape:', x.shape)
+        #print('x rotate shape:', x_rotated.shape)
+        #print('cos shape',cos.shape)
+        out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
+        return out
+    else:
+        # used for lumina
+        x_rotated = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+        freqs_cis = freqs_cis.unsqueeze(2)
+        x_out = torch.view_as_real(x_rotated * freqs_cis).flatten(3)
+
+        return x_out.type_as(x)
 class MemoryEfficientCrossAttention_tri(nn.Module):
     # https://github.com/MatthieuTPHR/diffusers/blob/d80b531ff8060ec1ea982b65a1b8df70f73aa67c/src/diffusers/models/attention.py#L223
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):
@@ -290,14 +333,15 @@ class MemoryEfficientCrossAttention_tri(nn.Module):
         self.dim_head = dim_head
 
         self.to_q = nn.Linear(query_dim, inner_dim, bias=False)
-        self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
+        #self.to_k = nn.Linear(context_dim, inner_dim, bias=False)
         self.to_v = nn.Linear(context_dim, inner_dim, bias=False)
 
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
 
-    def forward(self, x, context=None, mask=None):
+    def forward(self, x, image_rotary_emb,context=None, mask=None):
         # print(x.shape)
+        #print('oa enabled')
         q = self.to_q(x)
         if context==None:
             # print('tri_atten')
@@ -307,9 +351,9 @@ class MemoryEfficientCrossAttention_tri(nn.Module):
             # print(q.shape)
             # exit()
             ## triplane split
-            plane1 = q[:,0,:,:].clone()
-            plane2 = q[:,1,:,:].clone()
-            plane3 = q[:,2,:,:].clone()
+            plane1 = q[:,0,:,:]
+            plane2 = q[:,1,:,:]
+            plane3 = q[:,2,:,:]
             # context = default(context, x)
             # print(context)
             # print("shape:",context.shape)
@@ -322,11 +366,11 @@ class MemoryEfficientCrossAttention_tri(nn.Module):
             
 
             h=w = int(np.sqrt(l))
-            feat1 = plane1.clone().reshape(b,h,w,d)
-            feat2 = plane2.clone().reshape(b,h,w,d)
-            feat3 = plane3.clone().reshape(b,h,w,d)
-
-
+            if(h*w!=l):
+                raise ValueError(f"Sequence length {l} is not a perfect square. Cannot determine latent_size.")
+            feat1 = plane1.reshape(b,h,w,d)
+            feat2 = plane2.reshape(b,h,w,d)
+            feat3 = plane3.reshape(b,h,w,d)
             i = torch.arange(w)
             j = torch.arange(h)
             yy, xx = torch.meshgrid(i, j)
@@ -341,65 +385,66 @@ class MemoryEfficientCrossAttention_tri(nn.Module):
             feat = torch.cat((feat2[:, :, i, :], feat2[:, int(h/2 - 1), :, :].unsqueeze(2).repeat(1,1,l,1)),dim=1)
             p2_1 = feat.permute(0,2,1,3)
             feat = torch.cat((feat3[:, :, int(w/2 - 1), :].unsqueeze(2).repeat(1,1,l,1).permute(0,2,1,3), feat3[:, j, :, :]),dim=2)
-            p3_1 = feat
-            
+            p3_1 = feat         
             ## plane2 as q
             feat = torch.cat((feat1[:, :, i, :], feat1[:, int(h/2 - 1), :, :].unsqueeze(2).repeat(1,1,l,1)),dim=1)
             p1_2 = feat.permute(0,2,1,3)
             feat = torch.cat((feat3[:, :, w-1-j, :], feat3[:, int(h/2 - 1), :, :].unsqueeze(2).repeat(1,1,l,1)),dim=1)
             p3_2 = feat.permute(0,2,1,3)
-
-
-
             ## plane3 as q
             feat = torch.cat((feat1[:, :, int(w/2 - 1), :].unsqueeze(2).repeat(1,1,l,1).permute(0,2,1,3), feat1[:, j, :, :]),dim=2)
             p1_3 = feat
-            feat = torch.cat((feat3[:, :, int(w/2 - 1), :].unsqueeze(2).repeat(1,1,l,1).permute(0,2,1,3), feat3[:, h-1-i, :, :]),dim=2)
+            feat = torch.cat((feat3[:, :, int(w/2 - 1), :].unsqueeze(2).repeat(1,1,l,1).permute(0,2,1,3), feat2[:, h-1-i, :, :]),dim=2)
             p2_3 = feat
-
-
             p1_23 = torch.cat((p2_1, p3_1), dim=2)
             p2_13 = torch.cat((p1_2, p3_2), dim=2)
             p3_12 = torch.cat((p1_3, p2_3), dim=2)
 
             q = torch.cat((plane1, plane2, plane3), dim=0).unsqueeze(2) # 3b l 1 (hc) 
             k = torch.cat((p1_23, p2_13, p3_12), dim=0)
+            q = rearrange(q, 'b l f (h c) -> b l f h c', h=self.heads)
+            k = rearrange(k, 'b l f (h c) -> b l f h c', h=self.heads)
+            #print('q shape: ',q.shape)
+            #print('emb shape:',image_rotary_emb[0].shape)
+            #freq_cls = (image_rotary_emb[0,:h*w], image_rotary_emb[1,:h*w])
+            q = apply_rotary_emb(q,image_rotary_emb,sequence_dim=1)
+            k = apply_rotary_emb(k,image_rotary_emb,sequence_dim=1)
             v = k
 
-            # del p1_23
-            # del p2_13
-            # del p3_12
-            # del feat1
-            # del feat2
-            # del feat3
-            # torch.cuda.empty_cache()
+            del p1_23
+            del p2_13
+            del p3_12
+            del feat1
+            del feat2
+            del feat3
+            torch.cuda.empty_cache()
             
             # exit()
-            q = rearrange(q, 'b l f (h c) -> (b l) f h c', h=self.heads)
-            k = rearrange(k, 'b l f (h c) -> (b l) f h c', h=self.heads)
-            v = rearrange(v, 'b l f (h c) -> (b l) f h c', h=self.heads)
-            q_chunks = torch.chunk(q, 64, dim=0)
-            k_chunks = torch.chunk(k, 64, dim=0)
-            v_chunks = torch.chunk(v, 64, dim=0)
-            # print(q.shape, k_chunks[0].shape, v.shape)
-            # exit()
-            # actually compute the attention, what we cannot get enough of
-        
-            results = []
-            for q_chunk, k_chunk, v_chunk in zip(q_chunks, k_chunks, v_chunks):
-                if FLASHATTEN_IS_AVAILBLE:
-                    # print('flash')
-                    # out = flash_attn.flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
-                    out = flash_attn.flash_attn_func(q_chunk, k_chunk, v_chunk, dropout_p=0.0, softmax_scale=None, causal=False)
-                    # print(out.shape)
-                    results.append(out)
-                    # xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
-                    # print(out)
-
-                elif XFORMERS_IS_AVAILBLE:
-                    # print('xfo')
-                    out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
-            out = torch.cat(results, dim=0)
+            #print(q.shape)
+            q = rearrange(q, 'b l f h c -> (b l) f h c')
+            k = rearrange(k, 'b l f h c -> (b l) f h c')
+            v = rearrange(v, 'b l f h c -> (b l) f h c')
+            out = flash_attn.flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
+            #q_chunks = torch.chunk(q, 64, dim=0)
+            #k_chunks = torch.chunk(k, 64, dim=0)
+            #v_chunks = torch.chunk(v, 64, dim=0)
+            ## print(q.shape, k_chunks[0].shape, v.shape)
+            ## exit()
+            ## actually compute the attention, what we cannot get enough of
+            #results = []
+            #for q_chunk, k_chunk, v_chunk in zip(q_chunks, k_chunks, v_chunks):
+            #    if FLASHATTEN_IS_AVAILBLE:
+            #        # print('flash')
+            #        # out = flash_attn.flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
+            #        out = flash_attn.flash_attn_func(q_chunk, k_chunk, v_chunk, dropout_p=0.0, softmax_scale=None, causal=False)
+            #        # print(out.shape)
+            #        results.append(out)
+            #        # xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+            #        # print(out)
+            #    elif XFORMERS_IS_AVAILBLE:
+            #        # print('xfo')
+            #        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None, op=self.attention_op)
+            #out = torch.cat(results, dim=0)
             # print(out.shape)
             # exit()
             # with torch.backends.cuda.enable_flash_sdp():

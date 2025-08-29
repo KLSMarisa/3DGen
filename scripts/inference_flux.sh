@@ -1,0 +1,2 @@
+#!/bin/bash
+python -m torch.distributed.launch --master_port 100  --nproc_per_node 1 --use_env main.py --exp flux --init_step 7000 --config configs/base.yaml --mode inference --batch_size 1 --name flux_training  --savedir '/mnt/hdd3/linzhuohang/3DGen/ckpt' --device 1 --nodes 1 #--resume '/mnt/hdd3/linzhuohang/3DGen/ckpt/checkpoints/flux_training-step=24500.ckpt' 

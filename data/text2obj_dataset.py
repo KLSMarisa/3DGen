@@ -132,7 +132,7 @@ def read_obj(obj_path):
         #     return None, None
         
         img = Image.open(img_path)
-        img = img.resize((512, 512))
+        img = img.resize((256, 256))
         img = np.asarray(img)[:,:,0:3]
         # print(img.shape)
         
