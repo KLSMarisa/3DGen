@@ -1,3 +1,4 @@
+import argparse
 import torch
 from diffusers import FluxKontextPipeline 
 from diffusers.pipelines.flux.pipeline_output import FluxPipelineOutput
@@ -289,9 +290,9 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         def expand_prompt(prompt):
             prompt_3d = []
             for item in prompt:
-                prompt_3d.append('front view relative to the input image:')
-                prompt_3d.append('upper view relative to the input image:')
-                prompt_3d.append('side view relative to the input image:')
+                prompt_3d.append('front view relative to the input image:'+item)
+                prompt_3d.append('upper view relative to the input image:'+item)
+                prompt_3d.append('side view relative to the input image:'+item)
             return prompt_3d
         prompt = expand_prompt(prompt)
         prompt_2 = expand_prompt(prompt_2)
@@ -585,7 +586,8 @@ def get_pipeline(ckpt_path, Train = False):
             ckpt_path,
             device_map=device, 
             torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True
+            low_cpu_mem_usage=True,
+            strict=False
         )
         #print('guidance: ',oa_transformer.guidance_embeds)
     else:
@@ -598,7 +600,7 @@ def get_pipeline(ckpt_path, Train = False):
         #    low_cpu_mem_usage=True
         #)
         oa_transformer.load_state_dict(base_pipe.transformer.state_dict(), strict=False)
-        oa_transformer.save_pretrained('/mnt/hdd3/linzhuohang/3DGen/ckptv3/safetensors/0',safe_serialization=True,max_shard_size='3GB')
+        oa_transformer.save_pretrained('/mnt/hdd3/linzhuohang/3DGen/ckptv6/safetensors/0',safe_serialization=True,max_shard_size='3GB')
     #summary(oa_transformer, input_size=(3,512,64),device=device,dtypes=[torch.bfloat16])
     # 初始化DeepSpeed引擎，使用简化的配置
     if not Train:
@@ -637,4 +639,31 @@ def get_pipeline(ckpt_path, Train = False):
         pipe.to_device(device)
     return pipe
 
+def init_transformer(save_path):
+    try:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        device = f"cuda:{local_rank}"
+        multi_gpu = True
+        if(local_rank!=0): return
+    except:
+        multi_gpu = False
+        device = 'cuda'
+    base_pipe = FluxKontextPipeline.from_pretrained(
+        "/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170",
+        torch_dtype=torch.bfloat16,
+    )
+    #torch.save(base_pipe.transformer.time_text_embed.state_dict(),'embedding.bin')
+    print('loading transformer...')
+    config = base_pipe.transformer.config
+    oa_transformer = OAFluxTransformer2DModel.OAFluxTransformer2DModel(**config)
+    print('loading source transformer weights...')
+    oa_transformer.load_state_dict(base_pipe.transformer.state_dict(), strict=False)
+    oa_transformer.save_pretrained(save_path,safe_serialization=True,max_shard_size='3GB')
+    print(f'saved to {save_path}')
+    del base_pipe,oa_transformer
 
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--version', type=int)
+    args = parser.parse_args()
+    init_transformer(f'/mnt/hdd3/linzhuohang/3DGen/ckptv{args.version}/safetensors/0')

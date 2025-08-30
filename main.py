@@ -63,6 +63,8 @@ def parse_args():
     """ Args about Training """
     parser.add_argument('--nodes', type=int, default=1, help='nodes')
     parser.add_argument('--devices', type=int, default=1, help='e.g., gpu number')
+    parser.add_argument('--version', type=int, default=1, help='version of trainning')
+    
     #parser.add_argument('--local-rank',default=0)
     return parser.parse_args()
 
@@ -106,7 +108,7 @@ def main_func():
     elif args.exp == 'dit':
         trainer_model = STDITTrainer(config.ddconfig)
     elif args.exp == 'flux':
-        trainer_model = Flux_Trainer(log_interval=5,init_step=args.init_step,cpu_opt=cpu_opt,mode=args.mode)
+        trainer_model = Flux_Trainer(log_interval=5,init_step=args.init_step,cpu_opt=cpu_opt,version=args.version)
 
     ### Define trainer
 
@@ -176,7 +178,7 @@ def main_func():
         with torch.no_grad():
             trainer.predict(
                 model                     =     trainer_model,
-                dataloaders                =     dataloader,
+                dataloaders                =     val_dataloader,
                 ckpt_path                 =     args.resume,
             )
 

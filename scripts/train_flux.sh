@@ -1,8 +1,9 @@
 #!/bin/bash
 gpus=7
-version=5
+version=7
+#python -m flux_modules.OAFluxKontextPipeline2 --version $version
 python -m torch.distributed.launch \
-    --master_port 114  \
+    --master_port 115  \
     --nproc_per_node $gpus \
     --use_env main.py \
     --exp flux \
@@ -15,4 +16,5 @@ python -m torch.distributed.launch \
     --batch_size 1 \
     --nodes 1 \
     --init_step 0 \
-    --resume /mnt/hdd3/linzhuohang/3DGen/ckptv4/checkpoints/flux_training-step=5000.ckpt
+    --version $version
+    #--resume /mnt/hdd3/linzhuohang/3DGen/ckptv4/checkpoints/flux_training-step=5000.ckpt

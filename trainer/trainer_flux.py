@@ -26,17 +26,17 @@ import params_inspect
 
 from utils import measures
 class Flux_Trainer(pl.LightningModule):
-    def __init__(self,log_interval,init_step,cpu_opt,mode):
+    def __init__(self,log_interval,init_step,cpu_opt,version):
         super(Flux_Trainer, self).__init__()
         self.cpu_opt = cpu_opt
-        self.inference_saving_path = f'/home/linzhuohang/inf_outputs_v4/{init_step}'
-        self.val_saving_path = f'/home/linzhuohang/val_outputs_v4/'
+        self.inference_saving_path = f'/home/linzhuohang/inf_outputs_v{version}/{init_step}'
+        self.val_saving_path = f'/home/linzhuohang/val_outputs_v{version}/'
         self.loss_list = []
         self.log_interval = log_interval
-        ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv4/safetensors/{init_step}'
+        ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/{init_step}'
         if not os.path.exists(ckpt_path):
             print('using last version ckpt')
-            ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv3/safetensors/0'
+            ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/0'
         self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,Train =True)
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
@@ -395,7 +395,7 @@ class Flux_Trainer(pl.LightningModule):
         result_np = []
         for i in range(len(result)):
             result[i].save(f'{save_path}/{i}.jpg')
-            result_np.append(np.array(result[i],dtype=float)/127.5-1)
+            result_np.append(np.array(result[i].resize((OAFluxKontextPipeline.input_size,OAFluxKontextPipeline.input_size)),dtype=float)/127.5-1)
         loss = F.mse_loss(torch.tensor(result_np).flatten(1), batch['rgb'][0].cpu().flatten(1))
         self.log('val_loss',loss.item(),on_step = True)
         return loss

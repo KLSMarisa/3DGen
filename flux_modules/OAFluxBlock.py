@@ -38,15 +38,17 @@ class MLP(nn.Module):
         return x
 
 class OAFluxTransformerBlock(nn.Module):
-    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int,enable_gate_control=False, **kwargs):
+    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int,enable_gate_control=True, **kwargs):
         # 父类 __init__ 会创建 self.attn, self.ff, self.norm1, self.norm2 等原生模块
         super().__init__()
 
 
         self.enable_gate_control = enable_gate_control
-        self.norm1 = AdaLayerNormZero(dim) if enable_gate_control else nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
+        self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
-        self.ff = FeedForward(dim=dim, dim_out=dim, activation_fn="gelu-approximate")
+        scale_factor = 4
+        self.time_liner = MLP(num_attention_heads*attention_head_dim,num_attention_heads*attention_head_dim//scale_factor,num_attention_heads*attention_head_dim*4)
+        self.ff = MLP(dim, dim//scale_factor, dim)
         #self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         
         # 添加我们自己的正交注意力模块
@@ -96,8 +98,8 @@ class OAFluxTransformerBlock(nn.Module):
         #norm_hidden_states = self.norm1(hidden_states)
         #print(hidden_states.shape)
         if self.enable_gate_control:
-            norm_hidden_states, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.norm1(hidden_states, emb=temb)
-            
+            norm_hidden_states  = self.norm1(hidden_states)
+            gate_msa, shift_mlp, scale_mlp, gate_mlp = self.time_liner(temb).chunk(4, dim=-1)
             attn_output = self.ortho_attn(norm_hidden_states[:,:int(hidden_states.shape[1]/2), :],image_rotary_emb)
             latent_size = int(math.sqrt(hidden_states.shape[1]/2))
             ortho_combined =hidden_states[:, :latent_size*latent_size, :] + attn_output*gate_msa[:latent_size*latent_size].unsqueeze(1)
@@ -105,14 +107,16 @@ class OAFluxTransformerBlock(nn.Module):
             #self.debug_print('leaving oa_attn', hidden_states)
             # c. Feed-forward network
             norm_hidden_states = self.norm2(hidden_states)
-            norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
+            norm_hidden_states = norm_hidden_states * (1 + scale_mlp[:, None,:]) + shift_mlp[:, None,:]
 
             ff_output = self.ff(norm_hidden_states)
             ff_output = gate_mlp.unsqueeze(1) * ff_output
             hidden_states = hidden_states +   ff_output
         else:
             norm_hidden_states = self.norm1(hidden_states)
-            attn_output = self.ortho_attn(norm_hidden_states[:,:int(hidden_states.shape[1]/2), :],image_rotary_emb)
+            scale,shift = self.time_liner(temb).chunk(2, dim=-1)
+            attn_input = norm_hidden_states[:,:int(hidden_states.shape[1]/2), :] * (1 + scale[:, None, :]) + shift[:, None, :]
+            attn_output = self.ortho_attn(attn_input,image_rotary_emb)
             latent_size = int(math.sqrt(hidden_states.shape[1]/2))
             ortho_combined =hidden_states[:, :latent_size*latent_size, :] + attn_output
             hidden_states = torch.cat((ortho_combined, hidden_states[:, latent_size*latent_size:, :]), dim=1)
