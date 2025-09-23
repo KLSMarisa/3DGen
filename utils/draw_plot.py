@@ -112,8 +112,9 @@ def process_and_plot_data(root_dir):
     plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
 
     # 绘制 SSIM 折线图
-    #for key, values in plot_data["ssim"].items():
-    ax2.plot(labels, plot_data["ssim"]['all'], marker='s', linestyle='--', label=f"Category {key}")
+    for key, values in plot_data["ssim"].items():
+        ax2.plot(labels, values, marker='o', linestyle='-', label=f"Category {key}")
+    #ax2.plot(labels, plot_data["ssim"]['all'], marker='s', linestyle='--', label=f"Category {key}")
     ax2.set_title('SSIM vs. Iterations')
     ax2.set_xlabel('Iteration (Directory Name)')
     ax2.set_ylabel('Average SSIM')
@@ -131,5 +132,5 @@ if __name__ == "__main__":
     # 例如在 Windows 上: "D:\\data\\results"
     # 或在 Linux/macOS 上: "/home/user/data/results"
 
-    process_and_plot_data("/home/linzhuohang/val_outputs_v4")
+    process_and_plot_data("/home/linzhuohang/gso_outputs_v13")
 

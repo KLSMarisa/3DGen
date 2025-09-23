@@ -1,10 +1,10 @@
 #!/bin/bash
-gpus=4
-version=14
+gpus=1
+version=11
 #python -m flux_modules.OAFluxKontextPipeline2 --version $version
-#python model_converter.py --step 19000 --version 13
+#python model_converter.py --step 6500 --version $version
 python -m torch.distributed.launch \
-    --master_port 115  \
+    --master_port 114  \
     --nproc_per_node $gpus \
     --use_env main.py \
     --exp flux \
@@ -16,6 +16,6 @@ python -m torch.distributed.launch \
     --devices $gpus \
     --batch_size 1 \
     --nodes 1 \
-    --init_step 8000 \
+    --init_step 0 \
     --version $version \
-    --resume '/mnt/hdd3/linzhuohang/3DGen/ckptv'$version'/checkpoints/flux_training-step=9500.ckpt'
+    --resume '/mnt/hdd3/linzhuohang/3DGen/ckptv'$version'/checkpoints/flux_training-step=1000.ckpt'

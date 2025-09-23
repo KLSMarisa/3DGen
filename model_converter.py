@@ -29,7 +29,7 @@ def bin2safetensors(bin_file_path, output_dir):
         '_name_or_path': '/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170/transformer'
     }
     
-    oa_transformer = OAFluxTransformer2DModel.OAFluxTransformer2DModel.from_pretrained('/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170/transformer',strict=False,low_cpu_usag)
+    oa_transformer = OAFluxTransformer2DModel.OAFluxTransformer2DModel.from_pretrained('/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170/transformer',strict=False,low_cpu_mem_usage=True)
     state_dict = torch.load(bin_file_path+f'/{step}.bin')
     #print(state_dict.keys())
     embedding = torch.load('/home/linzhuohang/3DGen/embedding.bin')
@@ -60,6 +60,7 @@ if __name__ == "__main__":
     parser.add_argument('--version',type=int)
     args = parser.parse_args()
     step = args.step
+    print('converting model: version{} step{}'.format(args.version,step))
     ckpt_file_path = f"/mnt/hdd3/linzhuohang/3DGen/ckptv{args.version}/checkpoints/flux_training-step={step}.ckpt"
     bin_output_dir = f"/mnt/hdd3/linzhuohang/3DGen/ckptv{args.version}/bin"
     safetensors_output_dir = f"/mnt/hdd3/linzhuohang/3DGen/ckptv{args.version}/safetensors"

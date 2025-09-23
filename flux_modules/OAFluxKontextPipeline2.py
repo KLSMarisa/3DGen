@@ -229,6 +229,7 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         max_area: int = 1024**2,
         _auto_resize: bool = True,
         transformer = None,
+        use_caption = True
     ):
         
         if transformer is not None:
@@ -294,8 +295,11 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
                 prompt_3d.append('upper view relative to the input image:'+item)
                 prompt_3d.append('side view relative to the input image:'+item)
             return prompt_3d
-        prompt = expand_prompt(prompt)
-        prompt_2 = expand_prompt(prompt_2)
+        if use_caption:
+            prompt = expand_prompt(prompt)
+            prompt_2 = expand_prompt(prompt_2)
+        else:
+            prompt = prompt_2  = [' ',' ',' ']*batch_size
 
         lora_scale = (
             self.joint_attention_kwargs.get("scale", None) if self.joint_attention_kwargs is not None else None
@@ -436,8 +440,9 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         def expand_3d(arr):
             return torch.repeat_interleave(arr, repeats=3, dim=0)
         
-        latents = expand_3d(latents)
+        
         image_latents = expand_3d(image_latents) if image_latents is not None else None
+        latents = torch.randn_like(image_latents)
         print_tensor_info(latents, 'latents')
         print_tensor_info(image_latents, 'image_latents')
         #print('latents.shape:',latents.shape)
@@ -586,7 +591,6 @@ def get_pipeline(ckpt_path, Train = False):
             ckpt_path,
             device_map=device, 
             torch_dtype=torch.bfloat16,
-            low_cpu_mem_usage=True,
             strict=False
         )
         #print('guidance: ',oa_transformer.guidance_embeds)

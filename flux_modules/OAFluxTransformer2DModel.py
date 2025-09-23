@@ -42,18 +42,27 @@ class OAFluxTransformer2DModel(FluxTransformer2DModel):
         # 我们从 self.config 中获取所有必要的参数来构建我们的自定义 Block
         self.oa_emb = FluxPosEmbed(theta=10000,axes_dim=(64,64))
         # 从配置中获取Block所需的参数
-        num_layers = self.config.num_layers
+        self.num_layers = self.config.num_layers
+        self.num_single_layers = self.config.num_single_layers
         num_attention_heads = self.config.num_attention_heads
         
         # 3. 创建一个由我们自定义 Block 组成的新 ModuleList
+        block_cnt = self.num_layers+self.num_single_layers
+        scale_factor_list = [8]*block_cnt
+        scale_factor_list[0]=scale_factor_list[-1]=scale_factor_list[1]=scale_factor_list[-2]=1
+        scale_factor_list[2]=scale_factor_list[-3]=2
+        scale_factor_list[3]=scale_factor_list[-4]=4
+        
+        
         self.oa_transformer_blocks = nn.ModuleList(
             [
                 OAFluxTransformerBlock(
                     dim=self.inner_dim,
                     num_attention_heads=num_attention_heads,
-                    attention_head_dim=attention_head_dim
+                    attention_head_dim=attention_head_dim,
+                    scale_factor=scale_factor_list[i]
                 )
-                for _ in range(num_layers)
+                for i in range(block_cnt)
             ]
         )
         self.gradient_checkpointing = True
@@ -214,7 +223,7 @@ class OAFluxTransformer2DModel(FluxTransformer2DModel):
                     image_rotary_emb=image_rotary_emb,
                     joint_attention_kwargs=joint_attention_kwargs,
                 )
-
+            hidden_states = self.oa_transformer_blocks[self.num_layers+index_block](hidden_states, temb, oa_rotary_emb) 
             # controlnet residual
             if controlnet_single_block_samples is not None:
                 interval_control = len(self.single_transformer_blocks) / len(controlnet_single_block_samples)

@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import sys
@@ -15,8 +16,6 @@ import clip
 from diffusers import DDIMScheduler, DPMSolverMultistepScheduler, PNDMScheduler, DDPMScheduler
 from transformers import CLIPTokenizer, CLIPTextModel
 # from transformers import T5Tokenizer, T5ForConditionalGeneration
-from modules.networks import EMAModel, EMAModel_for_deepspeed_stage3
-from modules.StableDiffusion import UNetModel, FrozenCLIPEmbedder, AutoencoderKL, NormResBlock
 from torchvision.transforms import ToPILImage
 from diffusers import FluxKontextPipeline
 from flux_modules import OAFluxKontextPipeline2 as OAFluxKontextPipeline
@@ -24,19 +23,25 @@ from typing import Optional, Union, List
 from PIL import Image
 import params_inspect
 
+
 from utils import measures
 class Flux_Trainer(pl.LightningModule):
     def __init__(self,log_interval,init_step,cpu_opt,version):
         super(Flux_Trainer, self).__init__()
         self.cpu_opt = cpu_opt
-        self.inference_saving_path = f'/home/linzhuohang/inf_outputs_v{version}/{init_step}'
+        self.inference_saving_path = f'/home/linzhuohang/val_outputs_v{version}/{init_step}'
         self.val_saving_path = f'/home/linzhuohang/val_outputs_v{version}/'
         self.loss_list = []
         self.log_interval = log_interval
         ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/{init_step}'
         if not os.path.exists(ckpt_path):
-            print('using last version ckpt')
+            print('using 0 ckpt')
+            
             ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/0'
+        if not os.path.exists(ckpt_path):
+            print('using last version ckpt')
+            ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version-1}/safetensors/{init_step}'
+        
         self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,Train =True)
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
@@ -50,6 +55,8 @@ class Flux_Trainer(pl.LightningModule):
             #print(f'{i} :{block.enable_oa}')
             #block.enable_oa = False
         #self.transformer.transformer_blocks[0].requires_grad_(True)
+        self.transformer.norm_out.requires_grad_(True)
+        self.transformer.proj_out.requires_grad_(True)
         self.save_hyperparameters()
 
 
@@ -59,11 +66,11 @@ class Flux_Trainer(pl.LightningModule):
         optimizer = DeepSpeedCPUAdam if self.cpu_opt else FusedAdam
         opt = optimizer(
             grad_params,
-            lr=1e-4,
-            betas=(0.9, 0.9),
-            weight_decay=0.03
+            lr=4e-5,
+            betas=(0.9, 0.99),
+            weight_decay=0.02
         ) 
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=5000, eta_min=1e-6)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=16000, eta_min=0)
         scheduler_config = {"scheduler": scheduler, "interval": "step", "frequency": 1}
         return {"optimizer": opt,  "lr_scheduler": scheduler_config}
 
@@ -104,6 +111,7 @@ class Flux_Trainer(pl.LightningModule):
         max_sequence_length: int = 512,
         max_area: int = 1024**2,
         _auto_resize: bool = True,
+        use_caption = True
         ):
 
 
@@ -150,13 +158,16 @@ class Flux_Trainer(pl.LightningModule):
                 batch_size = len(prompt)
             else:
                 batch_size = prompt_embeds.shape[0]
-
-            prompt_3d = []
-            for i in range(batch_size):
-                prompt_3d.append('front view relative to the input image:'+prompt[i])
-                prompt_3d.append('upper view relative to the input image:'+prompt[i])
-                prompt_3d.append('side view relative to the input image:'+prompt[i])
+            if use_caption: 
+                prompt_3d = []
+                for i in range(batch_size):
+                    prompt_3d.append('front view relative to the input image:'+prompt[i])
+                    prompt_3d.append('upper view relative to the input image:'+prompt[i])
+                    prompt_3d.append('side view relative to the input image:'+prompt[i])
+            else: prompt_3d = [' ',' ',' ']
+            
             prompt_2 = prompt = prompt_3d
+            #print(prompt)
             lora_scale = (
                 self.pipeline.joint_attention_kwargs.get("scale", None) if self.pipeline.joint_attention_kwargs is not None else None
             )
@@ -331,6 +342,7 @@ class Flux_Trainer(pl.LightningModule):
             img_ids=latent_ids,
             joint_attention_kwargs=self.pipeline.joint_attention_kwargs,
             return_dict=False,
+            
         )[0]
         predict_vector = predict_vector[:, : latents.size(1)]
         print_tensor_info(predict_vector, 'predict_vector')
@@ -401,35 +413,36 @@ class Flux_Trainer(pl.LightningModule):
         return loss
     
     def predict_step(self, batch, batch_idx):
-        if batch_idx>20:
+        if batch_idx>10:
             sys.exit(0)
-        save_path = os.path.join(self.inference_saving_path, str(batch_idx))
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
-        #print('batch img shape:',batch['img'].shape)
-        with open(f'{save_path}/caption.txt', 'w') as f:
-            f.write(batch['caption'][0])
-        self.numpy_to_pil(batch['img']).save(save_path+'/src.jpg')
-        for i in range(len(batch['rgb'][0])):
-            self.numpy_to_pil(batch['rgb'][0][i]).save(f'{save_path}/src_{i}.jpg')
-        result = self.inference(batch['img'],batch['caption'])
-        #print('result:',len(result))
-        #print(result)
-        for i in range(len(result)):
-            result[i].save(f'{save_path}/{i}.jpg')
-        compare_path = os.path.join(save_path, 'compare.json')
-        compare_results = {}
-        if os.path.exists(compare_path):
-            with open(compare_path, 'r') as f:
-                compare_results = json.load(f)
-        for i in range(len(result)):
-            src_img = np.array(self.numpy_to_pil(batch['img'][0]))
-            gen_img = np.array(result[i])
-            psnr = measures.compare_psnr(src_img, gen_img)
-            ssim = measures.compare_ssim(src_img, gen_img, multichannel=True)
-            compare_results[str(i)] = {'psnr':psnr, 'ssim':ssim}
-        with open(compare_path, 'w') as f:
-            json.dump(compare_results, f)
+        for i in range(3):
+            save_path = os.path.join(self.inference_saving_path, str(batch_idx),str(i))
+            if not os.path.exists(save_path):
+                os.makedirs(save_path)
+            #print('batch img shape:',batch['img'].shape)
+            with open(f'{save_path}/caption.txt', 'w') as f:
+                f.write(batch['caption'][0])
+            self.numpy_to_pil(batch['img']).save(save_path+'/src.jpg')
+            for i in range(len(batch['rgb'][0])):
+                self.numpy_to_pil(batch['rgb'][0][i]).save(f'{save_path}/src_{i}.jpg')
+            result = self.inference(batch['img'],batch['caption'])
+            #print('result:',len(result))
+            #print(result)
+            for i in range(len(result)):
+                result[i].save(f'{save_path}/{i}.jpg')
+            compare_path = os.path.join(save_path, 'compare.json')
+            compare_results = {}
+            if os.path.exists(compare_path):
+                with open(compare_path, 'r') as f:
+                    compare_results = json.load(f)
+            for i in range(len(result)):
+                src_img = np.array(self.numpy_to_pil(batch['img'][0]))
+                gen_img = np.array(result[i])
+                psnr = measures.compare_psnr(src_img, gen_img)
+                ssim = measures.compare_ssim(src_img, gen_img, multichannel=True)
+                compare_results[str(i)] = {'psnr':psnr, 'ssim':ssim}
+            with open(compare_path, 'w') as f:
+                json.dump(compare_results, f)
 
     
     
@@ -448,16 +461,13 @@ class Flux_Trainer(pl.LightningModule):
             local_rank = 0
 
         #print(f'global_step: {self.global_step}, rank: {local_rank}')
-        predict_vector,target_vector = self.predict(batch['img'],batch['rgb'],batch['caption'],width=OAFluxKontextPipeline.input_size,height=OAFluxKontextPipeline.input_size)
+        predict_vector,target_vector = self.predict(batch['img'],batch['rgb'],batch['caption'],width=OAFluxKontextPipeline.input_size,height=OAFluxKontextPipeline.input_size,use_caption=False)
         #print('calculate loss')
         ### Step3: Compute loss
         if(batch_idx%(self.log_interval*10)==0 and local_rank==0): 
-            bias,q,ff_weight,ff_bias= params_inspect.inspect_transformer_blocks(self.transformer)
-            print(f'bias mean: {bias}, q mean: {q}')
-            self.log('bias_mean',bias,on_step=True)
-            self.log('q_mean',q,on_step=True)
-            self.log('ff_weight',ff_weight,on_step=True)
-            self.log('ff_bias',ff_bias,on_step=True)
+            
+            results= params_inspect.inspect_transformer_blocks(self.transformer)
+            self.log_dict(results,on_step=True,logger=True, on_epoch=False)
         loss = F.mse_loss(predict_vector.float().flatten(1), target_vector.float().flatten(1))
         #print('end training step')
         print('loss:',loss.detach())
@@ -471,16 +481,20 @@ class Flux_Trainer(pl.LightningModule):
             #    for name, param in self.transformer.named_parameters():
             #        if(param.requires_grad):
             #            print(f'{name} grad: {param.grad}')
-
-
-
-
-
-
         #if(self.global_step+1)%self.image_interval==0  and local_rank==0:
         #    print(f"global_step: {self.global_step}, generating sample")
         #    result =  self.inference(batch['img'][0].unsqueeze(0),batch['caption'][0])
         #    for i in range(3):
         #        result[i].save(f'/home/linzhuohang/train_outputs/{self.global_step}_{i}.jpg')
         return loss
+
+    def on_after_backward(self):
+        if self.global_step % 20 == 0:  # 每 500 step 记录一次
+            st_time = datetime.datetime.now()
+            grads = params_inspect.inspect_transformer_grads(self.transformer)
+            ed_time = datetime.datetime.now()
+            print('grad inspect time:',(ed_time-st_time))
+            if grads:
+                # 一次性写入 logger，on_step=True 保证逐步记录
+                self.log_dict(grads, on_step=True, on_epoch=False, logger=True)
 

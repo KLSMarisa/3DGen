@@ -51,7 +51,7 @@ def get_gpu_memory_usage():
         logging.error(f"获取GPU内存使用失败: {str(e)}")
     return {}
 
-def find_free_gpus(threshold=10):
+def find_free_gpus(threshold=1000):
     """查找内存使用低于阈值的GPU"""
     gpu_memory = get_gpu_memory_usage()
     free_gpus = []

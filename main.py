@@ -98,7 +98,7 @@ def main_func():
     dataloader = create_dataloader(config)
     val_dataloader = create_val_dataloader(config)
     ### Define model
-    cpu_opt = False
+    cpu_opt = config.cpu_offload
     if args.mode == 'inference':
         cpu_opt = True
     if args.exp == 'diffusion':

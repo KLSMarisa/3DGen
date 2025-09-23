@@ -53,7 +53,7 @@ def load_text2obj_dataset(
     # with open('/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/sd_scores.json', 'r') as f:
     #     data3 = json.load(f)
     
-    with open('/mnt/hdd1/caixiao/data/objaverse_1.0/caption/merged.json', 'r') as f:
+    with open('/mnt/hdd1/caixiao/data/gt23d-bench/merge_caption3.json', 'r') as f:
         data2 = json.load(f)
 
         
@@ -66,47 +66,37 @@ def load_text2obj_dataset(
             #print(line)
     
             img_info = dict()
-
-            # img_info['filename'] = line.split('\n')[0]
-            id = line.split('/')[-1]
-            # print(line)
-            #id = line['obj_id']
-            # caption = line['cap3d']
-            # caption = line['3dtopia']
-            # print(img_info['filename'])
-            # exit()
-            # white test
-            # file_path = img_info['filename'].replace("/3dgen/nerf/white_test2", "/data/pv_views_v2")
-            if not id in data3:
-                continue
-            if not str(id) in data2:
-                continue
-            caption = data2[id]
-            # print(caption)
-            # if len(caption)>96:
-            #     continue
-            # img_info['filename'] = img_info['filename'].replace("mnt/hdd1/caixiao/data/pv_views_v2", "mnt/hdd1/data")
-            img_info['filename'] = os.path.join("/mnt/hdd1/data", data3[id].split('pv_views_v2/')[1])
-            # print(img_info['filename'])
-            # img_info['filename'] = img_info['filename']
-            img_info['caption'] = caption
-            # print(img_info['filename'])
-            # print(caption)
-            # exit()
+            if 'gso' in data_dir:
+                img_info['filename'] = line
+                img_info['caption'] = ' '
+            else:
+                # img_info['filename'] = line.split('\n')[0]
+                id = line.split('/')[-1]
+                if not id in data3:
+                    continue
+                if not str(id) in data2:
+                    continue
+                caption = data2[id]
+                if not ('select' in data_dir):
+                    img_info['filename'] = line
+                else:
+                    img_info['filename'] = os.path.join("/mnt/hdd1/data", data3[id].split('pv_views_v2/')[1])
+                img_info['caption'] = caption
+                
             img_infos.append(img_info)
-            
-            ## black
-            # img_info['filename'] = img_info['filename'].replace("/3dgen/nerf/white_test2", "/data/pv_views_v2")
-            # ## ori
-            # if not img_info['filename'] in data2:
-            #     continue
-            # caption = data2[img_info['filename']]
-            # if len(caption)>96:
-            #     continue
-            # img_info['caption'] = caption
-            # # print(img_info['filename'])
-            # # exit()
-            # img_infos.append(img_info)
+
+                ## black
+                # img_info['filename'] = img_info['filename'].replace("/3dgen/nerf/white_test2", "/data/pv_views_v2")
+                # ## ori
+                # if not img_info['filename'] in data2:
+                #     continue
+                # caption = data2[img_info['filename']]
+                # if len(caption)>96:
+                #     continue
+                # img_info['caption'] = caption
+                # # print(img_info['filename'])
+                # # exit()
+                # img_infos.append(img_info)
     # img_infos = img_infos[:6500]
     # img_infos = sorted(img_infos, key=lambda x: x['filename'])
     print(f"load {len(img_infos)} objs in Text2ObjDataset")
@@ -196,7 +186,7 @@ def load_text2render_dataset(
     #     img_infos.append(img_info)
     # with open('/mnt/nfs/caixiao/datasets/objaverse/hf-objaverse-v1/downloaded.txt','r') as f:
     # with open('/home/caixiao/projects/3d_lib/caption/filter_data_dir.txt','r') as f:
-    with open('/home/caixiao/projects/LLaVA/out/merged/caption.json', 'r') as f:
+    with open('/mnt/hdd1/caixiao/data/gt23d-bench/merge_caption3.json', 'r') as f:
         data2 = json.load(f)
     
     with open(data_dir,'r') as f:
@@ -420,7 +410,7 @@ def Unified_val_Dataset(config):
     for dataset in datasets:
         if dataset == 'text2obj':
             _datasets.append(load_text2obj_dataset(
-                data_dir=config.dataset.text2obj.data_dir,
+                data_dir=config.dataset.text2obj_val.data_dir,
                 # view_num=config.dataset.text2obj.view_num
             ))
         elif dataset == 'text2scene':
