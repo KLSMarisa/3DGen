@@ -113,7 +113,8 @@ def read_obj(obj_path):
     # print(img_dir)
     img_lists = os.listdir(img_dir)
     # random_select = random.sample(img_lists, 3)
-    necessary_lists = ['rgb_0.png', 'rgb_63.png', 'rgb_4.png' ]
+    input_id = random.randint(0, 63)
+    necessary_lists = ['rgb_0.png', 'rgb_63.png', 'rgb_4.png',f'rgb_{input_id}.png' ]
     # idx1 = random.randint(0, 63)
     # idx2 = random.randint(0, 63)
     # idx3 = random.randint(0, 63)
@@ -150,8 +151,8 @@ def read_obj(obj_path):
     # t7 = time.time()
     # print(t7-t6)
     # print(imgs)
-    img_info['rgb'] = torch.stack(imgs)
-    img_info['img'] = imgs[0]
+    img_info['rgb'] = torch.stack(imgs[:3])
+    img_info['img'] = imgs[3]
     # img_info['depth'] = torch.stack(deps)
     # img_info['caption'] = caption
     # img_info['rgbd'] = torch.cat((img_info['rgb'], img_info['depth']), dim=1)

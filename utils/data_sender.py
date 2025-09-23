@@ -3,8 +3,8 @@ import subprocess
 import os
 
 # 配置目标服务器信息
-REMOTE_USER = "your_username"
-REMOTE_HOST = "your.server.com"
+REMOTE_USER = "caixiao"
+REMOTE_HOST = "121.48.161.104"
 REMOTE_BASE_DIR = "/path/to/data/pv-view"  # 目标服务器上的绝对路径
 
 # 读取 combined_path.json
