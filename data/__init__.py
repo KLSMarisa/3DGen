@@ -14,7 +14,7 @@ from tqdm import tqdm
 import json
 import time
 # pv.start_xvfb()
-
+from data.multiview_dataset import load_multiview_dataset 
 def load_text2obj_dataset(
     *,
     data_dir,
@@ -53,9 +53,9 @@ def load_text2obj_dataset(
     # with open('/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/sd_scores.json', 'r') as f:
     #     data3 = json.load(f)
     
-    with open('/mnt/hdd1/caixiao/data/gt23d-bench/merge_caption3.json', 'r') as f:
-        data2 = json.load(f)
-
+    #with open('/mnt/hdd1/caixiao/data/gt23d-bench/merge_caption3.json', 'r') as f:
+    #    data2 = json.load(f)
+    data2 = {}
         
         
     
@@ -66,7 +66,7 @@ def load_text2obj_dataset(
             #print(line)
     
             img_info = dict()
-            if 'gso' in data_dir:
+            if 'gso' in data_dir or 'multi_view' or 'multiview_300k' in data_dir:
                 img_info['filename'] = line
                 img_info['caption'] = ' '
             else:
@@ -409,10 +409,16 @@ def Unified_val_Dataset(config):
     assert len(datasets) > 0, "No dataset specified"
     for dataset in datasets:
         if dataset == 'text2obj':
-            _datasets.append(load_text2obj_dataset(
-                data_dir=config.dataset.text2obj_val.data_dir,
-                # view_num=config.dataset.text2obj.view_num
-            ))
+            if 'gso' in config.dataset.text2obj_val.data_dir:
+                _datasets.append(load_multiview_dataset(
+                    data_dir=config.dataset.text2obj_val.data_dir,
+                    # view_num=config.dataset.text2obj.view_num
+                ))
+            else:
+                _datasets.append(load_text2obj_dataset(
+                    data_dir=config.dataset.text2obj_val.data_dir,
+                    # view_num=config.dataset.text2obj.view_num
+                ))
         elif dataset == 'text2scene':
             _datasets.append(load_text2scene_dataset(
                 data_dir=config.dataset.text2scene.data_dir,
@@ -446,7 +452,8 @@ def create_dataloader(config):
         num_workers      =   10,
         collate_fn       =   None,
         pin_memory       =   False,
-        timeout=10,
+        prefetch_factor  = 10,
+        timeout=0,
     )
     return dataloader
 

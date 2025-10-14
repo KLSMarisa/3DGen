@@ -35,7 +35,7 @@ def model_worker(gpu_id, task_q, result_q, model_path, lora_path):
         pipe = DiffusionPipeline.from_pretrained(
             model_path, torch_dtype=torch.bfloat16, low_cpu_mem_usage=True
         )
-        pipe.load_lora_weights(lora_path)
+        #pipe.load_lora_weights(lora_path)
         pipe = pipe.to(device)
         print(f"[Worker-{gpu_id}] 模型加载成功。")
     except Exception as e:
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     app.state.result_queue = manager.Queue()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpus', type=int, default=2)
+    parser.add_argument('--gpus', type=int, default=4)
     args = parser.parse_args()
     MAX_GPUS_TO_USE = args.gpus
     

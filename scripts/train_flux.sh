@@ -1,21 +1,21 @@
 #!/bin/bash
-gpus=4
-version=14
+gpus=2
+version=16
 #python -m flux_modules.OAFluxKontextPipeline2 --version $version
-#python model_converter.py --step 19000 --version 13
-python -m torch.distributed.launch \
-    --master_port 115  \
-    --nproc_per_node $gpus \
-    --use_env main.py \
-    --exp flux \
-    --config "configs/base.yaml" \
-    --mode train \
-    --batch_size 1 \
-    --name flux_training  \
-    --savedir "/mnt/hdd3/linzhuohang/3DGen/ckptv"$version \
-    --devices $gpus \
-    --batch_size 1 \
-    --nodes 1 \
-    --init_step 8000 \
-    --version $version \
-    --resume '/mnt/hdd3/linzhuohang/3DGen/ckptv'$version'/checkpoints/flux_training-step=9500.ckpt'
+python model_converter.py --step 16500 --version 16
+#python -m torch.distributed.launch \
+#    --master_port 115  \
+#    --nproc_per_node $gpus \
+#    --use_env main.py \
+#    --exp flux \
+#    --config "configs/base.yaml" \
+#    --mode train \
+#    --batch_size 1 \
+#    --name flux_training  \
+#    #--savedir "/mnt/hdd3/linzhuohang/3DGen/ckptv"$version \
+#    --devices $gpus \
+#    --batch_size 1 \
+#    --nodes 1 \
+#    --init_step 500 \
+#    #--version $version \
+#    --resume latest

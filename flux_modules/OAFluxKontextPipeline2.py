@@ -16,7 +16,11 @@ import torch.nn as nn
 from safetensors.torch import load_file
 import os
 from torchinfo import summary
+from omegaconf import OmegaConf
 input_size = 256
+
+
+
 PREFERRED_KONTEXT_RESOLUTIONS = [
     (672, 1568),
     (688, 1504),
@@ -555,7 +559,7 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         self.transformer.to(device)
     
 
-def get_pipeline(ckpt_path, Train = False):
+def get_pipeline(ckpt_path,run_config, Train = False):
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
         device = f"cuda:{local_rank}"
@@ -567,7 +571,7 @@ def get_pipeline(ckpt_path, Train = False):
     print('device: ',device)
     print('connecting to pipeline...')
     base_pipe = FluxKontextPipeline.from_pretrained(
-        "/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170",
+        config.model_dir,
         torch_dtype=torch.bfloat16,
     )
     #torch.save(base_pipe.transformer.time_text_embed.state_dict(),'embedding.bin')
@@ -579,7 +583,7 @@ def get_pipeline(ckpt_path, Train = False):
     
     
     print('loading transformer weights...')
-    #state_dict = load_file('/mnt/hdd3/linzhuohang/3DGen/oa_transfomer')
+    #state_dict = load_file(f'{config.data_dir}/oa_transfomer')
     #oa_transformer.load_state_dict(state_dict)
     
     #print('oa transformer loaded')
@@ -598,13 +602,13 @@ def get_pipeline(ckpt_path, Train = False):
         oa_transformer = OAFluxTransformer2DModel.OAFluxTransformer2DModel(**config)
         print('loading source transformer weights...')
         #oa_transformer = oa_transformer.from_pretrained(
-        #    '/mnt/hdd3/linzhuohang/3DGen/oa_transfomer',
+        #    f'{config.data_dir}/oa_transfomer',
         #    device_map=device, 
         #    torch_dtype=torch.bfloat16,
         #    low_cpu_mem_usage=True
         #)
         oa_transformer.load_state_dict(base_pipe.transformer.state_dict(), strict=False)
-        oa_transformer.save_pretrained('/mnt/hdd3/linzhuohang/3DGen/ckptv6/safetensors/0',safe_serialization=True,max_shard_size='3GB')
+        oa_transformer.save_pretrained(f'{run_config.data_dir}/ckptv6/safetensors/0',safe_serialization=True,max_shard_size='3GB')
     #summary(oa_transformer, input_size=(3,512,64),device=device,dtypes=[torch.bfloat16])
     # 初始化DeepSpeed引擎，使用简化的配置
     if not Train:
@@ -643,7 +647,7 @@ def get_pipeline(ckpt_path, Train = False):
         pipe.to_device(device)
     return pipe
 
-def init_transformer(save_path):
+def init_transformer(save_path, config):
     try:
         local_rank = int(os.environ["LOCAL_RANK"])
         device = f"cuda:{local_rank}"
@@ -653,7 +657,7 @@ def init_transformer(save_path):
         multi_gpu = False
         device = 'cuda'
     base_pipe = FluxKontextPipeline.from_pretrained(
-        "/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170",
+        config.model_dir,
         torch_dtype=torch.bfloat16,
     )
     #torch.save(base_pipe.transformer.time_text_embed.state_dict(),'embedding.bin')
@@ -669,5 +673,7 @@ def init_transformer(save_path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--version', type=int)
+    parser.add_argument('--config', type=str, default='configs/base.yaml')
     args = parser.parse_args()
-    init_transformer(f'/mnt/hdd3/linzhuohang/3DGen/ckptv{args.version}/safetensors/0')
+    config = OmegaConf.load(args.config)
+    init_transformer(f'{config.data_dir}/ckptv{args.version}/safetensors/0')

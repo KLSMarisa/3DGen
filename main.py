@@ -27,6 +27,8 @@ import time
 from trainer.image_logger import ImageLogger
 from trainer.signal_receiver import CheckpointOnInterrupt
 from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.plugins.io import AsyncCheckpointIO
+import re
 #os.environ['WORLD_SIZE'] = '1'
 #os.environ['LOCAL_RANK'] = '0'
 class ResetOptimizerCallback(Callback):
@@ -43,7 +45,7 @@ class ResetOptimizerCallback(Callback):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--name', type=str, default='main', help='experiment identifier')
-    parser.add_argument('--savedir', type=str, default='/mnt/nfs/caixiao/deeplearning/ckpt/3DGEN', help='path to save checkpoints and logs')
+    parser.add_argument('--savedir', type=str, default='/mnt/nfs/caixiao/deeplearning/ckpt/3DGen', help='path to save checkpoints and logs')
     parser.add_argument('--exp', type=str, default='diffusion', choices=['diffusion', 'renderer','dit','flux'], help='experiment type to run')
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test','inference'], help='experiment mode to run')
     parser.add_argument('--seed', type=int, default=-1, help='random seed')
@@ -74,10 +76,25 @@ def main_func():
     args = parse_args()
     print(args)
     if(args.seed==-1): args.seed=time.time()
+    if args.resume=='latest':
+        print('searching for latest checkpoint...')
+        ckpt_dir = f'{args.savedir}/checkpoints'
+        latest_step = 0
+        if os.path.exists(ckpt_dir):
+            pattern = re.compile(r'flux_training-step=(\d+)\.ckpt')
+            steps = []
+            for fname in os.listdir(ckpt_dir):
+                m = pattern.match(fname)
+                if m:
+                    steps.append(int(m.group(1)))
+                if steps:
+                    latest_step = max(steps)
+        args.resume=f'{args.savedir}/checkpoints/flux_training-step={latest_step}.ckpt'
+        print(f'found checkpoint for step {latest_step}, resuming from {args.resume}')
     pl.seed_everything(args.seed, workers=True)
     config = OmegaConf.load(args.config)
     config.name = args.name
-    config.savedir = args.savedir
+    config.savedir = config.data_dir + f'/ckptv{config.version}/'
     config.mode = args.mode
     config.datasets = args.dataset
     config.batch_size = args.batch_size
@@ -108,7 +125,7 @@ def main_func():
     elif args.exp == 'dit':
         trainer_model = STDITTrainer(config.ddconfig)
     elif args.exp == 'flux':
-        trainer_model = Flux_Trainer(log_interval=5,init_step=args.init_step,cpu_opt=cpu_opt,version=args.version)
+        trainer_model = Flux_Trainer(config=config,init_step=args.init_step)
 
     ### Define trainer
 
@@ -155,6 +172,7 @@ def main_func():
         #val_check_interval        =     200*config.gradient_accumulation_steps,
         #limit_val_batches         =     10,
         check_val_every_n_epoch=None,
+        plugins=[AsyncCheckpointIO()],
         
 
     )

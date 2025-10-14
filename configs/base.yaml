@@ -1,8 +1,14 @@
 gradient_accumulation_steps: 5
-max_grad_norm: 1.0
+max_grad_norm: 10.0
 num_train_epochs: 100
 val_datasets: "text2obj_val"
-cpu_offload: false
+cpu_offload: true
+working_dir: '/home/linzhuohang/3DGen'
+data_dir: '/mnt/hdd3/linzhuohang/3DGen'
+model_dir: '/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170'
+log_interval: 5
+version: 16
+gradient_checkpointing: true
 dataset:
 #  video_size: [16, 3, 384, 704] # [16, 3, 320, 768] [16, 3, 384, 704]
 #  video_fps: 8
@@ -16,13 +22,18 @@ dataset:
     # data_dir: '/home/caixiao/projects/3d_lib/img/filter_data_v2.json'
     # data_dir: '/mnt/hdd1/caixiao/3dgen/nerf/white_test2/part5.json'
     #data_dir : '/mnt/hdd1/data/select_data1.json'
-    data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
+    #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
     #data_dir: '/home/linzhuohang/3DGen/configs/select_data2.json'
+    data_dir: '/home/linzhuohang/3DGen/configs/multiview_300k.json'
     # view_num: 16
+  #multi_view:
+    #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
   text2obj_val:
-    data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
+    data_dir: '/home/linzhuohang/3DGen/configs/multiview_300k.json'
+    #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
     #data_dir : '/mnt/hdd1/data/select_data1.json'
     #data_dir: '/home/linzhuohang/3DGen/configs/gso.json'
+    #data_dir: '/home/linzhuohang/3DGen/configs/gso_model.json'
   text2render:
     # data_dir: '/mnt/hdd1/caixiao/data/pv_views_64_1'
     data_dir: '/mnt/hdd1/data/select_data1.json'

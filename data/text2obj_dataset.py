@@ -104,17 +104,30 @@ def read_obj(obj_path):
 
 
 #### rgb
+    try:
+        local_rank = int(os.environ["LOCAL_RANK"])
+    except:
+        local_rank = 0
+    if 'random' in obj_path or 'high_score' in obj_path:
+        # print(img_dir)
+        view_list = os.listdir(obj_path)
+        #print(view_list)
+        random_select = random.sample(view_list, 1)[0]
+        img_dir = os.path.join(obj_path, random_select,'rgb')
+        #print(img_dir)
+        necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]
+    elif 'multiview_300k' in obj_path:
+        img_dir = obj_path
+        necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]
+    else:
+        parts = obj_path.split('/')
+        last_two_parts = '/'.join(parts[-2:])
+        img_dir = os.path.join(obj_path,'rgb')
 
-    parts = obj_path.split('/')
-    last_two_parts = '/'.join(parts[-2:])
-
-
-    img_dir = os.path.join(obj_path,'rgb')
-    # print(img_dir)
-    img_lists = os.listdir(img_dir)
-    # random_select = random.sample(img_lists, 3)
-    input_id = random.randint(0, 63)
-    necessary_lists = ['rgb_0.png', 'rgb_63.png', 'rgb_4.png',f'rgb_{input_id}.png' ]
+        # print(img_dir)
+        # random_select = random.sample(img_lists, 3)
+        input_id = random.randint(0, 63)
+        necessary_lists = ['rgb_0.png', 'rgb_63.png', 'rgb_4.png',f'rgb_{input_id}.png' ]
     # idx1 = random.randint(0, 63)
     # idx2 = random.randint(0, 63)
     # idx3 = random.randint(0, 63)
@@ -143,14 +156,11 @@ def read_obj(obj_path):
         # print(tensor_image[0,255,:])
         # exit()
         imgs.append(tensor_image[:3])
-
-        # depth
-        idx = i.split('_')[1].split('.')[0]
         # print(idx)
 
     # t7 = time.time()
     # print(t7-t6)
-    # print(imgs)
+    #rint(local_rank,': ',imgs)
     img_info['rgb'] = torch.stack(imgs[:3])
     img_info['img'] = imgs[3]
     # img_info['depth'] = torch.stack(deps)
@@ -286,7 +296,7 @@ class Text2ObjDataset(IterableDataset):
                 yield img_info
 
             except Exception as e:
-                print(e)
+                raise e
                 idx = (idx + num_workers) % self.size
                 continue
 

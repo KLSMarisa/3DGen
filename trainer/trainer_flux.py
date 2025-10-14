@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 import sys
+import time
 import PIL
 import numpy as np
 import torch
@@ -26,38 +27,40 @@ import params_inspect
 
 from utils import measures
 class Flux_Trainer(pl.LightningModule):
-    def __init__(self,log_interval,init_step,cpu_opt,version):
+    def __init__(self,init_step,config):
         super(Flux_Trainer, self).__init__()
-        self.cpu_opt = cpu_opt
-        self.inference_saving_path = f'/home/linzhuohang/val_outputs_v{version}/{init_step}'
+        version = config.version
+        self.cpu_opt = config.cpu_offload
+        self.inference_saving_path = f'/home/linzhuohang/train_outputs_v{version}/{init_step}'
         self.val_saving_path = f'/home/linzhuohang/val_outputs_v{version}/'
         self.loss_list = []
-        self.log_interval = log_interval
-        ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/{init_step}'
+        self.log_interval = config.log_interval
+        ckpt_path= f'{config.data_dir}/ckptv{version}/safetensors/{init_step}'
         if not os.path.exists(ckpt_path):
             print('using 0 ckpt')
             
-            ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version}/safetensors/0'
+            ckpt_path= f'{config.data_dir}/ckptv{version}/safetensors/0'
         if not os.path.exists(ckpt_path):
             print('using last version ckpt')
-            ckpt_path= f'/mnt/hdd3/linzhuohang/3DGen/ckptv{version-1}/safetensors/{init_step}'
+            ckpt_path= f'{config.data_dir}/ckptv{version-1}/safetensors/{init_step}'
         
-        self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,Train =True)
+        self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,config=config,Train =True)
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
         print(self.transformer)
         del self.pipeline.transformer
         torch.cuda.empty_cache()
         block_lenth = len(self.transformer.oa_transformer_blocks)
+        self.transformer.norm_out.requires_grad_(True)
+        self.transformer.proj_out.requires_grad_(True)
+        self.transformer.gradient_checkpointing = config.gradient_checkpointing
         for i,block in enumerate(self.transformer.oa_transformer_blocks):
             block.requires_grad_(True)
-            if i!=0:  block.use_checkpoint = True
+            if i!=0 and config.gradient_checkpointing:  block.use_checkpoint = True
             #print(f'{i} :{block.enable_oa}')
             #block.enable_oa = False
         #self.transformer.transformer_blocks[0].requires_grad_(True)
-        self.transformer.norm_out.requires_grad_(True)
-        self.transformer.proj_out.requires_grad_(True)
-        self.save_hyperparameters()
+        
 
 
     def configure_optimizers(self):
@@ -413,9 +416,9 @@ class Flux_Trainer(pl.LightningModule):
         return loss
     
     def predict_step(self, batch, batch_idx):
-        if batch_idx>10:
+        if batch_idx>20:
             sys.exit(0)
-        for i in range(3):
+        for i in range(2):
             save_path = os.path.join(self.inference_saving_path, str(batch_idx),str(i))
             if not os.path.exists(save_path):
                 os.makedirs(save_path)
@@ -464,10 +467,14 @@ class Flux_Trainer(pl.LightningModule):
         predict_vector,target_vector = self.predict(batch['img'],batch['rgb'],batch['caption'],width=OAFluxKontextPipeline.input_size,height=OAFluxKontextPipeline.input_size,use_caption=False)
         #print('calculate loss')
         ### Step3: Compute loss
-        if(batch_idx%(self.log_interval*10)==0 and local_rank==0): 
-            
+        if(batch_idx%(self.log_interval)==0 and local_rank==0): 
+            #t1 = time.time()
             results= params_inspect.inspect_transformer_blocks(self.transformer)
+            #grads =  params_inspect.inspect_transformer_grads(self.transformer)
+            #t2 = time.time()
+            #print('inspect time:',t2-t1)
             self.log_dict(results,on_step=True,logger=True, on_epoch=False)
+            #self.log_dict(grads, on_step=True, on_epoch=False, logger=True)
         loss = F.mse_loss(predict_vector.float().flatten(1), target_vector.float().flatten(1))
         #print('end training step')
         print('loss:',loss.detach())
@@ -489,7 +496,7 @@ class Flux_Trainer(pl.LightningModule):
         return loss
 
     def on_after_backward(self):
-        if self.global_step % 20 == 0:  # 每 500 step 记录一次
+        if self.global_step % 5 == 0:  # 每 500 step 记录一次
             st_time = datetime.datetime.now()
             grads = params_inspect.inspect_transformer_grads(self.transformer)
             ed_time = datetime.datetime.now()
