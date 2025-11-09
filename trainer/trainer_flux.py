@@ -24,6 +24,46 @@ from typing import Optional, Union, List
 from PIL import Image
 import params_inspect
 
+def sample_timesteps_log_normal(
+    batch_size: int,
+    num_timesteps: int,
+    mu: float = 1.5,
+    sigma: float = 1.5,
+    device: str = 'cpu'
+) -> torch.Tensor:
+    """
+    根据类对数正态分布 (Log-Normal-inspired) 的策略采样时间步索引。
+
+    这种方法会偏向性地采样索引，而不是纯粹的均匀随机。
+    通过调整 mu 和 sigma，可以控制采样的中心和范围。
+
+    参数:
+        batch_size (int): 批量大小。
+        num_timesteps (int): 总的时间步数量 (例如 len(scheduler.timesteps))。
+        mu (float): 控制采样中心的参数。mu > 0 会使采样偏向末尾（低噪声）。
+        sigma (float): 控制采样集中度的参数。值越小，采样越集中。
+        device (str): 'cpu' 或 'cuda'。
+
+    返回:
+        torch.Tensor: 形状为 (batch_size,) 的时间步索引张量。
+    """
+    # 1. 从标准正态分布 N(0, 1) 中采样
+    normal_samples = torch.randn(batch_size, device=device)
+
+    # 2. 使用 mu 和 sigma 对正态样本进行缩放和移位
+    transformed_samples = mu + sigma * normal_samples
+
+    # 3. 使用 Sigmoid 函数将值域映射到 (0, 1) 区间
+    #    这可以将无界的正态分布值转化为类似“百分比”的值
+    p = torch.sigmoid(transformed_samples)
+
+    # 4. 将 (0, 1) 区间的值缩放到总的时间步索引范围 [0, num_timesteps - 1]
+    indices_float = p * (num_timesteps - 1)
+
+    # 5. 转换为长整型，并使用 clamp 确保索引不会因浮点误差越界
+    indices = torch.clamp(indices_float.long(), 0, num_timesteps - 1)
+
+    return indices
 
 from utils import measures
 class Flux_Trainer(pl.LightningModule):
@@ -31,7 +71,7 @@ class Flux_Trainer(pl.LightningModule):
         super(Flux_Trainer, self).__init__()
         version = config.version
         self.cpu_opt = config.cpu_offload
-        self.inference_saving_path = f'/home/linzhuohang/train_outputs_v{version}/{init_step}'
+        self.inference_saving_path = f'/home/linzhuohang/train_outputs_v{version}_2/{init_step}'
         self.val_saving_path = f'/home/linzhuohang/val_outputs_v{version}/'
         self.loss_list = []
         self.log_interval = config.log_interval
@@ -43,8 +83,10 @@ class Flux_Trainer(pl.LightningModule):
         if not os.path.exists(ckpt_path):
             print('using last version ckpt')
             ckpt_path= f'{config.data_dir}/ckptv{version-1}/safetensors/{init_step}'
-        
-        self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,config=config,Train =True)
+        if not os.path.exists(ckpt_path):
+            print('using last version 0 ckpt')
+            ckpt_path= f'{config.data_dir}/ckptv{version-1}/safetensors/0'
+        self.pipeline = OAFluxKontextPipeline.get_pipeline(ckpt_path,config,Train =True)
         self.pipeline.frozen_parameters()
         self.transformer = self.pipeline.transformer
         print(self.transformer)
@@ -85,7 +127,6 @@ class Flux_Trainer(pl.LightningModule):
     def dtype(self):
         return next(self.parameters()).data.dtype
 
-
     def predict(
         self,
         image,
@@ -98,7 +139,7 @@ class Flux_Trainer(pl.LightningModule):
         width: Optional[int] = None,
         num_inference_steps: int = 28,
         sigmas: Optional[List[float]] = None,
-        guidance_scale: float = 3.5,
+        guidance_scale: float = 0,
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.FloatTensor] = None,
@@ -126,6 +167,7 @@ class Flux_Trainer(pl.LightningModule):
             def print_tensor_info(tensor, name):    
                 #print(f'{name} info:    min={tensor.min().item()}  max={tensor.max().item()}   mean={tensor.mean().item()} std={tensor.std().item()}    shape={tensor.shape}')
                 pass
+            
             device = self.pipeline._execution_device
             image.to(device)
             image = (image+1.0)/2.0
@@ -167,7 +209,7 @@ class Flux_Trainer(pl.LightningModule):
                     prompt_3d.append('front view relative to the input image:'+prompt[i])
                     prompt_3d.append('upper view relative to the input image:'+prompt[i])
                     prompt_3d.append('side view relative to the input image:'+prompt[i])
-            else: prompt_3d = [' ',' ',' ']
+            else: prompt_3d = [' ',' ',' ']*batch_size
             
             prompt_2 = prompt = prompt_3d
             #print(prompt)
@@ -265,7 +307,7 @@ class Flux_Trainer(pl.LightningModule):
                 guidance = guidance.expand(image.shape[0])
             else:
                 guidance = None
-
+            guidance = expand_3d(guidance)
             if (ip_adapter_image is not None or ip_adapter_image_embeds is not None) and (
                 negative_ip_adapter_image is None and negative_ip_adapter_image_embeds is None
             ):
@@ -303,7 +345,10 @@ class Flux_Trainer(pl.LightningModule):
             
             
             noise = torch.randn_like(gt_images_latents).to(device)
-            indices = torch. torch.randint(0, len(self.pipeline.scheduler.timesteps), (batch_size,), device='cpu')
+            indices = sample_timesteps_log_normal(
+                batch_size=batch_size,
+                num_timesteps=len(self.pipeline.scheduler.timesteps),
+            )
 # Get the actual timestep values from the scheduler's list using the random indices
             t = self.pipeline.scheduler.timesteps[indices].to(device)
             t_reshaped = t.view(batch_size, *([1] * (gt_images_latents.dim() - 1)))
@@ -334,7 +379,7 @@ class Flux_Trainer(pl.LightningModule):
             #print(latent_model_input.shape)
             #print('text ids shape:',text_ids.shape)
             #print('latent ids shape:',latent_ids.shape)
-            
+        t = expand_3d(t)
         predict_vector = self.transformer(
             hidden_states=latent_model_input,
             timestep=t / 1000,
@@ -366,9 +411,9 @@ class Flux_Trainer(pl.LightningModule):
             neg_noise_pred = neg_noise_pred[:, : latents.size(1)]
             predict_vector = neg_noise_pred + true_cfg_scale * (predict_vector - neg_noise_pred)
         return predict_vector,target_vector
-
+   
     def inference(self,image,prompt):
-        result = self.pipeline(image,prompt,prompt,transformer = self.transformer,height=OAFluxKontextPipeline.input_size,width=OAFluxKontextPipeline.input_size)
+        result = self.pipeline(image,prompt,prompt,transformer = self.transformer,height=OAFluxKontextPipeline.input_size,width=OAFluxKontextPipeline.input_size,use_caption=False,output_middle_images=True)
         return result
 
 
@@ -428,9 +473,16 @@ class Flux_Trainer(pl.LightningModule):
             self.numpy_to_pil(batch['img']).save(save_path+'/src.jpg')
             for i in range(len(batch['rgb'][0])):
                 self.numpy_to_pil(batch['rgb'][0][i]).save(f'{save_path}/src_{i}.jpg')
-            result = self.inference(batch['img'],batch['caption'])
+            pipeline_output = self.inference(batch['img'],batch['caption'])
+            result = pipeline_output['images']
+            middle_images = pipeline_output['middle_images']
             #print('result:',len(result))
             #print(result)
+            os.makedirs(f'{save_path}/middle', exist_ok=True)
+            for i in range(len(middle_images)):
+                for j in range(len(middle_images[i])):
+                    middle_images[i][j].save(f'{save_path}/middle/{i}_{j}.jpg')
+            
             for i in range(len(result)):
                 result[i].save(f'{save_path}/{i}.jpg')
             compare_path = os.path.join(save_path, 'compare.json')

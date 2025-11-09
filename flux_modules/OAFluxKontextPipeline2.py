@@ -212,7 +212,7 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         width: Optional[int] = None,
         num_inference_steps: int = 28,
         sigmas: Optional[List[float]] = None,
-        guidance_scale: float = 3.5,
+        guidance_scale: float = 0,
         num_images_per_prompt: Optional[int] = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         latents: Optional[torch.FloatTensor] = None,
@@ -233,7 +233,8 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         max_area: int = 1024**2,
         _auto_resize: bool = True,
         transformer = None,
-        use_caption = True
+        use_caption = False,
+        output_middle_images = False,
     ):
         
         if transformer is not None:
@@ -447,12 +448,14 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         
         image_latents = expand_3d(image_latents) if image_latents is not None else None
         latents = torch.randn_like(image_latents)
-        print_tensor_info(latents, 'latents')
-        print_tensor_info(image_latents, 'image_latents')
-        #print('latents.shape:',latents.shape)
-        #print('latent_id.shape',latent_ids.shape)
-        #print('text_id.shape',text_ids.shape)
-        #print('image_latent.shape',image_latents.shape)
+        mid_output_type = output_type if output_type != "latent" else "pil"
+        middle_images = [] if output_middle_images else None
+
+        def decode_latents_snapshot(latent_tensor):
+            unpacked = self._unpack_latents(latent_tensor.detach().clone(), height, width, self.vae_scale_factor)
+            unpacked = (unpacked / self.vae.config.scaling_factor) + self.vae.config.shift_factor
+            decoded = self.vae.decode(unpacked, return_dict=False)[0]
+            return self.image_processor.postprocess(decoded, output_type=mid_output_type)
         
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
@@ -524,7 +527,8 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-
+                if output_middle_images:
+                    middle_images.append(decode_latents_snapshot(latents))
 
 
         self._current_timestep = None
@@ -542,8 +546,11 @@ class OAFluxKontextPipeline2(FluxKontextPipeline):
         self.maybe_free_model_hooks()
 
         if not return_dict:
+            if output_middle_images:
+                return image, middle_images
             return (image,)
-
+        if output_middle_images:
+            return {"images": image, "middle_images": middle_images}
         return image
     
     def frozen_parameters(self):
@@ -571,7 +578,7 @@ def get_pipeline(ckpt_path,run_config, Train = False):
     print('device: ',device)
     print('connecting to pipeline...')
     base_pipe = FluxKontextPipeline.from_pretrained(
-        config.model_dir,
+        run_config.model_dir,
         torch_dtype=torch.bfloat16,
     )
     #torch.save(base_pipe.transformer.time_text_embed.state_dict(),'embedding.bin')

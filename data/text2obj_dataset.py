@@ -116,6 +116,9 @@ def read_obj(obj_path):
         img_dir = os.path.join(obj_path, random_select,'rgb')
         #print(img_dir)
         necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]
+    elif 'multiview_300k_2' in obj_path:
+        img_dir = os.path.join(obj_path,'0/front')
+        necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]
     elif 'multiview_300k' in obj_path:
         img_dir = obj_path
         necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]

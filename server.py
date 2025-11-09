@@ -11,7 +11,7 @@ import asyncio
 import os
 import multiprocessing
 import uuid
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # --- 1. 全局配置 ---
 MAX_GPUS_TO_USE = 6
@@ -45,16 +45,18 @@ def model_worker(gpu_id, task_q, result_q, model_path, lora_path):
     while True:
         try:
             # 每个worker从自己的专属队列中获取任务
-            request_id, image_bytes, prompt = task_q.get()
+            request_id, image_bytes, prompt, guidance_scale = task_q.get()
             
             if request_id is None:
                 print(f"[Worker-{gpu_id}] 收到终止信号，即将退出。")
                 break
 
             print(f"[Worker-{gpu_id}] 开始处理请求 {request_id}")
-            input_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            input_image = None
+            if image_bytes is not None:
+                input_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
             generated_image = pipe(
-                image=input_image, prompt=prompt, guidance_scale=2.5,
+                image=input_image, prompt=prompt, guidance_scale=guidance_scale,
             ).images[0]
             img_byte_arr = io.BytesIO()
             generated_image.save(img_byte_arr, format='PNG')
@@ -102,35 +104,51 @@ async def result_collector(result_q, num_workers):
 # --- 5. FastAPI 应用生命周期事件 (逻辑修改) ---
 @app.on_event("startup")
 async def startup_event():
-    available_gpus = torch.cuda.device_count()
-    num_gpus = min(MAX_GPUS_TO_USE, available_gpus)
-    app.state.num_workers = num_gpus
+    app.state.worker_processes = []
+    app.state.task_queues = []
+    app.state.num_workers = 0
 
-    if num_gpus == 0:
+    available_gpus = torch.cuda.device_count()
+    if available_gpus == 0:
         print("!!! 错误：未检测到CUDA设备，服务无法启动工作进程。")
         return
 
-    print(f"--- 正在为 {num_gpus} 个GPU启动工作进程... ---")
-    
-    # 为每个worker创建一个专属的任务队列
-    app.state.task_queues = [app.state.manager.Queue() for _ in range(num_gpus)]
-    app.state.worker_processes = []
-    
+    qualified_gpu_ids = []
+    for idx in range(available_gpus):
+        try:
+            with torch.cuda.device(idx):
+                free_mem, total_mem = torch.cuda.mem_get_info()
+        except RuntimeError as e:
+            print(f"!!! 无法获取 GPU {idx} 显存信息: {e}")
+            continue
+        used_mem_mb = (total_mem - free_mem) / (1024 ** 2)
+        if used_mem_mb < 1000:
+            qualified_gpu_ids.append(idx)
+
+    if not qualified_gpu_ids:
+        print("!!! 错误：没有显存占用低于 1000MB 的 GPU，服务无法启动工作进程。")
+        return
+
+    selected_gpu_ids = qualified_gpu_ids[:MAX_GPUS_TO_USE]
+    print(f"--- 选定 GPU {selected_gpu_ids} (显存占用 < 1000MB) ---")
+
+    app.state.num_workers = len(selected_gpu_ids)
+    app.state.worker_gpu_ids = selected_gpu_ids
+
     result_queue = app.state.result_queue
-    
-    for i in range(num_gpus):
-        # 将专属任务队列传递给对应的worker
-        task_queue = app.state.task_queues[i]
+
+    for gpu_id in selected_gpu_ids:
+        task_queue = app.state.manager.Queue()
+        app.state.task_queues.append(task_queue)
         p = multiprocessing.Process(
             target=model_worker,
-            args=(i, task_queue, result_queue, MODEL_PATH, LORA_PATH),
+            args=(gpu_id, task_queue, result_queue, MODEL_PATH, LORA_PATH),
             daemon=True
         )
         app.state.worker_processes.append(p)
         p.start()
-    
-    # 启动结果收集器时告知总worker数量
-    asyncio.create_task(result_collector(result_queue, num_gpus))
+
+    asyncio.create_task(result_collector(result_queue, app.state.num_workers))
     print("--- 所有工作进程和结果收集器已启动。服务准备就绪。 ---")
 
 @app.on_event("shutdown")
@@ -141,7 +159,7 @@ def shutdown_event():
     
     # 向每个专属任务队列发送终止信号
     for q in task_queues:
-        q.put((None, None, None))
+        q.put((None, None, None, None))
     
     for p in worker_processes:
         p.join(timeout=5)
@@ -155,14 +173,15 @@ def shutdown_event():
 async def generate_single(
     request: Request,
     prompt: str = Form(...),
-    image: UploadFile = File(...)
+    image: Optional[UploadFile] = File(None),
+    guidance_scale: float = Form(2.5),
 ):
     if not request.app.state.worker_processes:
         raise HTTPException(status_code=503, detail="没有可用的工作进程。")
 
     try:
         request_id = str(uuid.uuid4())
-        image_bytes = await image.read()
+        image_bytes = await image.read() if image is not None else None
         event = asyncio.Event()
         request_events[request_id] = event
 
@@ -170,7 +189,7 @@ async def generate_single(
         print(f"[Main] 广播请求 {request_id} 到 {request.app.state.num_workers} 个工作进程。")
         task_queues = request.app.state.task_queues
         for q in task_queues:
-            q.put((request_id, image_bytes, prompt))
+            q.put((request_id, image_bytes, prompt, guidance_scale))
 
         await asyncio.wait_for(event.wait(), timeout=300)
 
