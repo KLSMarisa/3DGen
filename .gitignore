@@ -194,5 +194,7 @@ wandb/
 .code-workspace
 
 custom/*
+!custom/zero123_finetune/
+!custom/zero123_finetune/*.py
 
 load/tets/256_tets.npz
