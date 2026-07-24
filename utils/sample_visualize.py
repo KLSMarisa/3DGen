@@ -76,7 +76,7 @@ print(f"indices = sample_timesteps_log_normal(batch_size={batch_size}, num_times
 # 生成大量样本以供可视化
 large_batch = 10000
 indices_uniform = torch.randint(0, num_timesteps, (large_batch,), device=device)
-indices_new_visual = sample_timesteps_log_normal(large_batch, num_timesteps, mu=-0.8, sigma=1.5, device=device)
+indices_new_visual = sample_timesteps_log_normal(large_batch, num_timesteps, mu=-0.5, sigma=1, device=device)
 
 plt.figure(figsize=(12, 5))
 plt.subplot(1, 2, 1)

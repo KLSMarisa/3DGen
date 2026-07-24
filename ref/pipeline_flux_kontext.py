@@ -16,7 +16,8 @@ import inspect
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import numpy as np
-import torch
+import torch 
+
 from transformers import (
     CLIPImageProcessor,
     CLIPTextModel,
@@ -26,11 +27,11 @@ from transformers import (
     T5TokenizerFast,
 )
 
-from ...image_processor import PipelineImageInput, VaeImageProcessor
-from ...loaders import FluxIPAdapterMixin, FluxLoraLoaderMixin, FromSingleFileMixin, TextualInversionLoaderMixin
-from ...models import AutoencoderKL, FluxTransformer2DModel
-from ...schedulers import FlowMatchEulerDiscreteScheduler
-from ...utils import (
+from diffusers.image_processor import PipelineImageInput, VaeImageProcessor
+from diffusers.loaders import FluxIPAdapterMixin, FluxLoraLoaderMixin, FromSingleFileMixin, TextualInversionLoaderMixin
+from diffusers.models import AutoencoderKL, FluxTransformer2DModel
+from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+from diffusers.utils import (
     USE_PEFT_BACKEND,
     is_torch_xla_available,
     logging,
@@ -38,9 +39,9 @@ from ...utils import (
     scale_lora_layers,
     unscale_lora_layers,
 )
-from ...utils.torch_utils import randn_tensor
-from ..pipeline_utils import DiffusionPipeline
-from .pipeline_output import FluxPipelineOutput
+from diffusers.utils.torch_utils import randn_tensor
+from diffusers.pipelines.pipeline_utils import DiffusionPipeline
+from diffusers.pipelines.flux.pipeline_output import FluxPipelineOutput
 
 
 if is_torch_xla_available():
@@ -97,6 +98,7 @@ PREFERRED_KONTEXT_RESOLUTIONS = [
     (1456, 720),
     (1504, 688),
     (1568, 672),
+    (512,512)
 ]
 
 
@@ -172,6 +174,9 @@ def retrieve_timesteps(
         timesteps = scheduler.timesteps
     return timesteps, num_inference_steps
 
+def print_tensor_info(tensor, name):    
+    print(f'{name} info:    min={tensor.min().item()}  max={tensor.max().item()}   mean={tensor.mean().item()} std={tensor.std().item()}    shape={tensor.shape}')
+            
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img.retrieve_latents
 def retrieve_latents(
@@ -1054,7 +1059,7 @@ class FluxKontextPipeline(
             for i, t in enumerate(timesteps):
                 if self.interrupt:
                     continue
-
+                print(f"Step {t}")
                 self._current_timestep = t
                 if image_embeds is not None:
                     self._joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
@@ -1063,7 +1068,8 @@ class FluxKontextPipeline(
                 if image_latents is not None:
                     latent_model_input = torch.cat([latents, image_latents], dim=1)
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
-
+                print_tensor_info(latents, name="latents")
+                print_tensor_info(image_latents, name="image_latents")
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,
                     timestep=timestep / 1000,
@@ -1076,7 +1082,7 @@ class FluxKontextPipeline(
                     return_dict=False,
                 )[0]
                 noise_pred = noise_pred[:, : latents.size(1)]
-
+                print_tensor_info(noise_pred, name="noise_pred")
                 if do_true_cfg:
                     if negative_image_embeds is not None:
                         self._joint_attention_kwargs["ip_adapter_image_embeds"] = negative_image_embeds

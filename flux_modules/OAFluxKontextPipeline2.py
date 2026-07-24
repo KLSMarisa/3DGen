@@ -683,4 +683,4 @@ if __name__ == '__main__':
     parser.add_argument('--config', type=str, default='configs/base.yaml')
     args = parser.parse_args()
     config = OmegaConf.load(args.config)
-    init_transformer(f'{config.data_dir}/ckptv{args.version}/safetensors/0')
+    init_transformer(f'{config.data_dir}/ckptv{args.version}/safetensors/0',config)

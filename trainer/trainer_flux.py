@@ -27,8 +27,8 @@ import params_inspect
 def sample_timesteps_log_normal(
     batch_size: int,
     num_timesteps: int,
-    mu: float = 1.5,
-    sigma: float = 1.5,
+    mu: float = 0,
+    sigma: float = 1,
     device: str = 'cpu'
 ) -> torch.Tensor:
     """
@@ -348,6 +348,8 @@ class Flux_Trainer(pl.LightningModule):
             indices = sample_timesteps_log_normal(
                 batch_size=batch_size,
                 num_timesteps=len(self.pipeline.scheduler.timesteps),
+                mu=-0.5,
+                sigma=1,
             )
 # Get the actual timestep values from the scheduler's list using the random indices
             t = self.pipeline.scheduler.timesteps[indices].to(device)
@@ -456,6 +458,7 @@ class Flux_Trainer(pl.LightningModule):
         for i in range(len(result)):
             result[i].save(f'{save_path}/{i}.jpg')
             result_np.append(np.array(result[i].resize((OAFluxKontextPipeline.input_size,OAFluxKontextPipeline.input_size)),dtype=float)/127.5-1)
+        return 0
         loss = F.mse_loss(torch.tensor(result_np).flatten(1), batch['rgb'][0].cpu().flatten(1))
         self.log('val_loss',loss.item(),on_step = True)
         return loss

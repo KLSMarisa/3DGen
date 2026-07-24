@@ -53,14 +53,15 @@ class OAFluxTransformer2DModel(FluxTransformer2DModel):
         scale_factor_list[2]=scale_factor_list[-3]=2
         scale_factor_list[3]=scale_factor_list[-4]=4
         
-        
+        enable_ca_list = [False]*block_cnt
         self.oa_transformer_blocks = nn.ModuleList(
             [
                 OAFluxTransformerBlock(
                     dim=self.inner_dim,
                     num_attention_heads=num_attention_heads,
                     attention_head_dim=attention_head_dim,
-                    scale_factor=scale_factor_list[i]
+                    scale_factor=scale_factor_list[i],
+                    enable_ca=enable_ca_list[i],
                 )
                 for i in range(block_cnt)
             ]

@@ -1,14 +1,27 @@
 gradient_accumulation_steps: 5
-max_grad_norm: 10.0
-num_train_epochs: 100
+max_grad_norm: 1
+num_train_epochs: 200
 val_datasets: "text2obj_val"
 cpu_offload: False
-working_dir: '/home/linzhuohang/3DGen'
-data_dir: '/mnt/hdd3/linzhuohang/3DGen'
-model_dir: '/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170'
+working_dir: '/data/home/2024120101018/linzhuohang/3DGen/3DGen_new'
+data_dir: '/data/home/2024120101018/linzhuohang/3DGen/data'
+model_dir: '/data/home/2024120101018/linzhuohang/3DGen/data/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170'
 log_interval: 5
-version: 17
-gradient_checkpointing: true
+learning_rate: 1e-5
+gradient_checkpointing: False
+no_data_stack: False
+image_resolution: 512
+vae_train_strategy: 'frozen' # 'frozen' 'encoder_last' 'all' 'decoder_last'
+use_pred_angle: False
+dino_path: '/data/home/2024120101018/linzhuohang/3DGen/data/dinov3'
+feature_loss_weight: 0.5
+cls_loss_weight: 1
+flow_loss_weight: 100
+trellis_train:
+  regressor_weights_path: "/data/home/2024120101018/linzhuohang/3DGen/data/angle_predictor.bin"
+  adapter_init_weights_path: "/data/home/2024120101018/linzhuohang/3DGen/data/elevation_adapter3_7.bin"
+  pipeline_path: "microsoft/TRELLIS.2-4B"
+  record_tgt_paths_onqy: false
 dataset:
 #  video_size: [16, 3, 384, 704] # [16, 3, 320, 768] [16, 3, 384, 704]
 #  video_fps: 8
@@ -22,18 +35,71 @@ dataset:
     # data_dir: '/home/caixiao/projects/3d_lib/img/filter_data_v2.json'
     # data_dir: '/mnt/hdd1/caixiao/3dgen/nerf/white_test2/part5.json'
     #data_dir : '/mnt/hdd1/data/select_data1.json'
+
     #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
-    #data_dir: '/home/linzhuohang/3DGen/configs/select_data2.json'
-    data_dir: '/home/linzhuohang/3DGen/configs/multiview_300k.json'
+    data_dir: 'configs/regularview_300k.json'
+    #data_dir: 'configs/elevation_train.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k"
+    #data_dir: 'configs/select_data2.json'
+    #data_dir: 'configs/multiview_300k.json'
     # view_num: 16
   #multi_view:
-    #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
+    #data_dir: 'configs/elevation.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k "
   text2obj_val:
-    data_dir: '/home/linzhuohang/3DGen/configs/multiview_300k_2.json'
+    data_dir: 'configs/regularview_300k_val.json'
+    #data_dir: 'configs/elevation_val.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k"
+
     #data_dir: '/mnt/hdd1/caixiao/data/objaverse_1.0/utils/data_select/rgb2.json'
+    #data_dir: 'configs/multiview_300k_2.json'
+    #data_dir: 'configs/elevation.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k "
     #data_dir : '/mnt/hdd1/data/select_data1.json'
-    #data_dir: '/home/linzhuohang/3DGen/configs/gso.json'
-    #data_dir: '/home/linzhuohang/3DGen/configs/gso_model.json'
+    #data_dir: 'configs/gso.json'
+    #data_dir: 'configs/gso_model.json'
+    #data_dir: 'configs/random_view.json'
+  elevation:
+    use_pipeline_predictor: true
+    pipeline_weights_path: /data/home/2024120101018/linzhuohang/3DGen/data/angle_predictor.bin
+    pipeline_dino_image_size: 512
+    reload_interval_steps: 10
+    inference_output_path: /data/home/2024120101018/linzhuohang/3DGen/data/testset/group_view/angle_pred.json
+    inference_image_dir: /data/home/2024120101018/linzhuohang/3DGen/data/testset/group_view/HighElevation_0Roll
+  elavation_train:
+    # data_dir: 'configs/elevation_train.json'
+    # root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k"
+    data_dir: 'configs/regularview_300k.json'
+    # root: "/data/home/2024120101018/linzhuohang/3DGen/data/regularview_300k"
+    # data_dir: 'configs/random_view.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/random_view"
+    # processor: pair_dataset
+    processor: ElevationIterableDataset
+  elavation_val:
+    # data_dir: 'configs/elevation_val.json'
+    # root: "/data/home/2024120101018/linzhuohang/3DGen/data/high_score_25k"
+    data_dir: 'configs/regularview_300k_val.json'
+    # root: "/data/home/2024120101018/linzhuohang/3DGen/data/regularview_300k"
+    # data_dir: 'configs/random_view_val.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/random_view"
+    # processor: pair_dataset
+    processor: ElevationIterableDataset
+  rotator_train:
+    #data_dir: 'configs/regularview_300k.json'
+    #root: "/data/home/2024120101018/linzhuohang/regularview_300k"
+    data_dir: configs/random_view.json
+    root: /data/home/2024120101018/linzhuohang/random_view
+    glb_db: glb_index.sqlite
+    glb_root: /mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/
+  rotator_val:
+    #data_dir: 'configs/regularview_300k_val.json'
+    #root: "/data/home/2024120101018/linzhuohang/3DGen/data/regularview_300k"
+    data_dir: configs/random_view_val.json
+    root: /data/home/2024120101018/linzhuohang/random_view
+    glb_db: glb_index.sqlite
+    glb_root: /mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/
+  render_sparse:
+    data_dir: data_queue/tgt_paths_rank3.json
   text2render:
     # data_dir: '/mnt/hdd1/caixiao/data/pv_views_64_1'
     data_dir: '/mnt/hdd1/data/select_data1.json'

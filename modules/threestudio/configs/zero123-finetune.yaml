@@ -1,0 +1,48 @@
+name: "zero123-ft"
+tag: "35-ft"
+exp_root_dir: "outputs"
+use_timestamp: true
+
+data_type: "zero123-pair-datamodule"
+data:
+  train_manifest: /data/home/2024120101018/linzhuohang/3DGen/data/zero123_random_view_ft/train_35.jsonl
+  val_manifest: /data/home/2024120101018/linzhuohang/3DGen/data/zero123_random_view_ft/val_35.jsonl
+  image_size: 256
+  batch_size: 8
+  num_workers: 4
+  shuffle: true
+  default_target_elev: 35.0
+  ref_elev_min: 40
+
+system_type: "zero123-finetune-system"
+resume: /data/home/2024120101018/linzhuohang/3DGen/3DGen_new/modules/threestudio/outputs/zero123-ft/35-ft/ckpts/epoch=0-step=20000.ckpt
+system:
+  pretrained_model_name_or_path: "./load/zero123/stable_zero123.ckpt"
+  #pretrained_model_name_or_path: /data/home/2024120101018/linzhuohang/3DGen/3DGen_new/modules/threestudio/outputs/zero123-ft/base/save/checkpoints/full_model_init_step_10000.ckpt
+  pretrained_config: "./load/zero123/sd-objaverse-finetune-c_concat-256.yaml"
+
+  train_unet: true
+  train_cc_projection: true
+  train_cond_stage: false
+  train_first_stage: false
+
+  lr: 1.0e-5
+  lr_t_max: 20000
+  lr_eta_min: 0
+  val_guidance_scale: 1
+  betas: [0.9, 0.999]
+  weight_decay: 1.0e-2
+
+trainer:
+  max_steps: 100000
+  log_every_n_steps: 5
+  num_sanity_val_steps: 1
+  val_check_interval: 250
+  limit_val_batches: 100
+  enable_progress_bar: true
+  precision: 32
+
+checkpoint:
+  save_last: true
+  save_top_k: -1
+  every_n_train_steps: 1000

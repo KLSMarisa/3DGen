@@ -1,6 +1,6 @@
 import flux_modules.env_set
 import torch
-from diffusers import FluxKontextPipeline
+from ref.pipeline_flux_kontext import FluxKontextPipeline
 from diffusers.utils import load_image
 from diffusers.pipelines.pipeline_utils import PipelineQuantizationConfig
 import accelerate
@@ -17,7 +17,10 @@ def run_pipe():
     #pipe.enable_sequential_cpu_offload()
     pipe = pipe.to("cuda")
     print("--- 模型加载成功 ---")
-    image = load_image("sample.jpg").convert("RGB")
+    image = load_image("flux_modules/sample.jpg").convert("RGB")
+    image = image.resize((512,512))
+    print(f"VAE Shift: {pipe.vae.config.shift_factor}")
+    print(f"VAE Scale: {pipe.vae.config.scaling_factor}")
     prompt = "change the person to kiresame marisa in touhou project."
     print("--- 开始生成图像 ---")
 

@@ -35,7 +35,7 @@ def create_final_dataset(csv_path, output_json_path):
             raise ValueError(f"The CSV file must contain a '{col}' column.")
 
     # Take the top 200k high-scoring rows from the filtered dataset
-    top_200k = data.sort_values(by="aesthetic", ascending=False).head(200000)
+    top_200k = data.sort_values(by="aesthetic", ascending=False).head(50000)
     if len(top_200k) == 0:
         raise ValueError("No rows remain after filtering; cannot build dataset.")
 
@@ -46,13 +46,13 @@ def create_final_dataset(csv_path, output_json_path):
     random_100k = data.sort_values(by="aesthetic", ascending=False)[200000:].sample(n=min(100000, len(data)), random_state=42)
 
     # Combine the top 200k and random 100k rows
-    combined_data = pd.concat([top_200k, random_100k]).drop_duplicates()
+    combined_data = top_200k#pd.concat([top_200k, random_100k]).drop_duplicates()
     #combined_data= top_50k
     # Create the final dataset with specific data paths
     final_dataset = combined_data.apply(
         lambda row: f"/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/{row[required_columns[0]]}/{row[required_columns[1]]}.glb", axis=1
     ).tolist()
-    with open('combined_300k.json', "w") as json_file:
+    with open(output_json_path, "w") as json_file:
         json.dump(final_dataset, json_file)
     #path_list = combined_data.apply(
     #    lambda row: f"/mnt/hdd1/caixiao/data/pv_views/{row[required_columns[0]]}/{row[required_columns[1]]}", axis=1
@@ -63,7 +63,7 @@ def create_final_dataset(csv_path, output_json_path):
     #with open('combined_path.json', "w") as json_file:
     #    json.dump(path_list, json_file)
     
-   # print(f"Final dataset saved to {output_json_path}")
+    print(f"Final dataset saved to {output_json_path}")
 
 # Example usage:
-create_final_dataset("/mnt/hdd1/caixiao/data/gt23d-bench/all_flag_8.csv", "high_score_25k.json")
+create_final_dataset("/mnt/hdd1/caixiao/data/gt23d-bench/all_flag_8.csv", "high_score_50k.json")

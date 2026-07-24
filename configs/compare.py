@@ -49,8 +49,8 @@ def compare_json_files(file_a, file_b, output_file):
 
 if __name__ == '__main__':
     # 定义输入和输出文件名
-    file_a = 'rgb2.json'
-    file_b = '/mnt/hdd1/data/select_data1.json'
+    file_a = '/home/linzhuohang/3DGen/configs/random_view_val.json'
+    file_b = '/home/linzhuohang/3DGen/configs/regularview_300k.json'
     output_file = 'diff.json'
 
     # 调用函数进行比较

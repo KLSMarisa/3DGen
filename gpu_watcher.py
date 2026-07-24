@@ -7,7 +7,8 @@ import signal
 import sys
 import argparse
 from datetime import datetime
-
+THRESHOLD=1000
+STALE_TIMEOUT = 600  # 10 minutes in seconds
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -52,7 +53,7 @@ def get_gpu_memory_usage():
         logging.error(f"获取GPU内存使用失败: {str(e)}")
     return {}
 
-def find_free_gpus(threshold=1000):
+def find_free_gpus(threshold=THRESHOLD):
     """查找内存使用低于阈值（默认为 10000 MB）的GPU"""
     gpu_memory = get_gpu_memory_usage()
     free_gpus = []
@@ -65,8 +66,55 @@ def find_free_gpus(threshold=1000):
     free_gpus.sort()
     return free_gpus
 
-def launch_process(gpu_indices, script_path):
-    """设置环境变量并启动脚本或 Python 文件，等待其完成"""
+def select_best_topology_gpus(free_gpus, count):
+    """
+    从空闲GPU中选择指定数量的GPU，优先选择处于同一组（(0,1), (2,3)...）的GPU。
+    """
+    if len(free_gpus) < count:
+        return []
+    
+    # 将GPU按组分类，组ID = gpu_id // 2
+    groups = {}
+    for gpu in free_gpus:
+        group_id = gpu // 2
+        groups.setdefault(group_id, []).append(gpu)
+        
+    full_pairs = []
+    singles = []
+    
+    # 区分完整对和单个GPU
+    for gid in sorted(groups.keys()):
+        g_gpus = sorted(groups[gid])
+        if len(g_gpus) == 2:
+            full_pairs.append(g_gpus)
+        else:
+            singles.extend(g_gpus)
+            
+    selected = []
+    needed = count
+    
+    # 1. 优先获取完整对
+    while needed >= 2 and full_pairs:
+        pair = full_pairs.pop(0)
+        selected.extend(pair)
+        needed -= 2
+        
+    # 2. 如果还需要，从剩余池中获取（包括单个GPU和未被选中的完整对）
+    remaining_pool = singles
+    for pair in full_pairs:
+        remaining_pool.extend(pair)
+    remaining_pool.sort()
+    
+    if needed > 0:
+        selected.extend(remaining_pool[:needed])
+        
+    return sorted(selected)
+
+def launch_process(gpu_indices, script_path, monitor=False, stale_timeout=STALE_TIMEOUT, check_interval=30):
+    """设置环境变量并启动脚本或 Python 文件，等待其完成。
+    如果 monitor=True，则监视日志文件的修改时间；在超过 stale_timeout 秒没有更新时重启进程。
+    返回最终进程的退出代码。
+    """
     try:
         device_str = ",".join(map(str, gpu_indices))
         os.environ["CUDA_VISIBLE_DEVICES"] = device_str
@@ -76,36 +124,130 @@ def launch_process(gpu_indices, script_path):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         log_file = os.path.join(log_dir, f"task_{timestamp}.log")
         logging.info(f"启动脚本: {script_path}, 日志文件: {log_file}")
-        
+
         # 判断是否为 Python 文件，构造执行命令
         command = ["python", script_path] if script_path.endswith(".py") else [script_path]
-        
-        with open(log_file, "w") as log_f:
-            log_f.write(f"任务启动时间: {timestamp}\n")
+
+        # Helper to start the subprocess and append to the same log file
+        def _start_process():
+            log_f = open(log_file, "a", buffering=1)
+            log_f.write(f"\n任务启动时间: {datetime.now().strftime('%Y%m%d_%H%M%S')}\n")
             log_f.write(f"使用的GPU: {device_str}\n")
             log_f.write("-" * 50 + "\n")
-            process = subprocess.Popen(
+            proc = subprocess.Popen(
                 command,
                 stdout=log_f,
                 stderr=subprocess.STDOUT,
                 env=os.environ,
                 text=True
             )
-            return_code = process.wait()
-            log_f.write("\n" + "-" * 50 + "\n")
-            log_f.write(f"任务结束时间: {datetime.now().strftime('%Y%m%d_%H%M%S')}\n")
-            log_f.write(f"退出代码: {return_code}\n")
-            
-            if return_code == 0:
-                logging.info("脚本执行成功完成")
-            else:
-                logging.error(f"脚本执行失败，退出代码: {return_code}")
-        return return_code
+            return proc, log_f
+
+        # Start the first process
+        proc, log_f = _start_process()
+        last_update = time.time()
+        try:
+            # Initialize last_update to the current mtime if file exists
+            if os.path.exists(log_file):
+                last_update = os.path.getmtime(log_file)
+                # convert to epoch
+                if isinstance(last_update, float):
+                    last_update = last_update
+                last_update = time.time()
+
+            while True:
+                # Poll process
+                ret = proc.poll()
+
+                # Check log modification time
+                try:
+                    mtime = os.path.getmtime(log_file)
+                    # If file mtime changed recently, update last_update timestamp
+                    # We compare against previous recorded modification via time() to track activity.
+                    if time.time() - mtime < check_interval + 1:
+                        last_update = time.time()
+                except Exception:
+                    # If we can't stat the file, ignore and continue
+                    pass
+
+                # If monitoring is enabled and log is stale, restart process
+                if monitor and (time.time() - last_update) > stale_timeout:
+                    logging.warning(f"日志在 {stale_timeout} 秒内无更新，重启任务...")
+                    # Try graceful terminate
+                    try:
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                    except Exception as e:
+                        logging.warning(f"终止进程时出错: {e}")
+
+                    # Close old log handle and write restart marker
+                    try:
+                        log_f.write("\n" + "-" * 50 + "\n")
+                        log_f.write(f"日志无更新，重启时间: {datetime.now().strftime('%Y%m%d_%H%M%S')}\n")
+                        log_f.flush()
+                        log_f.close()
+                    except Exception:
+                        pass
+
+                    # Restart process
+                    proc, log_f = _start_process()
+                    last_update = time.time()
+
+                # If process exited, finalize and return code
+                if ret is not None:
+                    try:
+                        log_f.write("\n" + "-" * 50 + "\n")
+                        log_f.write(f"任务结束时间: {datetime.now().strftime('%Y%m%d_%H%M%S')}\n")
+                        log_f.write(f"退出代码: {ret}\n")
+                        log_f.close()
+                    except Exception:
+                        pass
+
+                    if ret == 0:
+                        logging.info("脚本执行成功完成")
+                    else:
+                        logging.error(f"脚本执行失败，退出代码: {ret}")
+                    return ret
+
+                # Sleep a short while before next check
+                for _ in range(check_interval):
+                    if exit_flag:
+                        break
+                    time.sleep(1)
+
+                if exit_flag:
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=5)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    try:
+                        log_f.write("\n" + "-" * 50 + "\n")
+                        log_f.write(f"因接收到退出信号，任务被终止: {datetime.now().strftime('%Y%m%d_%H%M%S')}\n")
+                        log_f.close()
+                    except Exception:
+                        pass
+                    return 1
+
+        finally:
+            # Ensure file handle closed
+            try:
+                if not log_f.closed:
+                    log_f.close()
+            except Exception:
+                pass
+
     except Exception as e:
         logging.error(f"启动任务失败: {str(e)}")
         return 1
 
-def monitor_gpus(required_gpus, script_path, continue_on_failure):
+def monitor_gpus(required_gpus, script_path, continue_on_failure, monitor_flag=False):
     """监控GPU内存使用情况，并在找到足够资源时启动任务"""
     global exit_flag
     try:
@@ -133,7 +275,13 @@ def monitor_gpus(required_gpus, script_path, continue_on_failure):
                 logging.info(f"找到 {len(free_gpus)} 张空闲GPU: {free_gpus}。准备启动任务...")
                 
                 # 启动任务
-                return_code = launch_process(free_gpus[:required_gpus], script_path)
+                # 使用优先分组策略选择 GPU
+                best_gpus = select_best_topology_gpus(free_gpus, required_gpus)
+                # monitor only takes effect when used together with continue_on_failure
+                effective_monitor = monitor_flag and continue_on_failure
+                if monitor_flag and not continue_on_failure:
+                    logging.warning("--monitor 已启用但未设置 --continue；忽略监控重启行为，继续正常启动任务。")
+                return_code = launch_process(best_gpus, script_path, monitor=effective_monitor)
 
                 if return_code == 0:
                     # 任务成功，退出程序
@@ -184,6 +332,13 @@ if __name__ == "__main__":
         default=False,
         help="如果任务失败，是否继续监控GPU资源并重试启动任务 (默认: False)"
     )
+    parser.add_argument(
+        "--monitor",
+        dest="monitor",
+        action="store_true",
+        default=False,
+        help="配合 --continue 使用：持续监控任务日志，超过10分钟无更新则重启任务"
+    )
     
     args = parser.parse_args()
     
@@ -201,6 +356,6 @@ if __name__ == "__main__":
         except Exception as e:
             logging.warning(f"无法设置脚本执行权限: {e}")
             
-    monitor_gpus(args.gpus, args.script, args.continue_on_failure)
+    monitor_gpus(args.gpus, args.script, args.continue_on_failure, args.monitor)
     
     logging.info("程序退出")

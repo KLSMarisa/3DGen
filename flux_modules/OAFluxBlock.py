@@ -6,7 +6,7 @@ import torch.nn as nn
 import math
 import deepspeed
 from typing import Any, Dict, Optional, Tuple, Union
-from modules.StableDiffusion.attention import MemoryEfficientCrossAttention_tri
+from modules.StableDiffusion.attention import MemoryEfficientCrossAttention_tri,MemoryEfficientCrossAttention
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_processor import (
     Attention,
@@ -40,26 +40,29 @@ class MLP(nn.Module):
         return x
 
 class OAFluxTransformerBlock(nn.Module):
-    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int,scale_factor, **kwargs):
+    def __init__(self, dim: int, num_attention_heads: int, attention_head_dim: int,scale_factor,enable_ca, **kwargs):
         super().__init__()
 
         self.enable_gate_control = True
+        self.enable_ca = enable_ca
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         
         # NOTE: 这里的输入维度是 dim
-        self.time_liner = FeedForward(dim=dim, dim_out=dim*4,mult=1/scale_factor)
+        self.time_liner = FeedForward(dim=dim, dim_out=dim*4,mult=0.1/scale_factor)
         
         # --- [修改] 新增一个可学习的位置嵌入，用于区分组内的3个样本 ---
         self.position_emb = nn.Embedding(3, dim)
         # --- 修改结束 ---
 
-        self.ff =  FeedForward(dim=dim, dim_out=dim,mult=min(1,2.0/scale_factor))
+        self.ff =  FeedForward(dim=dim, dim_out=dim,mult=min(1,1.0/scale_factor))
         
         self.ortho_attn = MemoryEfficientCrossAttention_tri(
             query_dim=dim,
             dim_head=attention_head_dim,
         )
+        if self.enable_ca:
+            self.cross_attn = MemoryEfficientCrossAttention(query_dim=dim,dim_head=attention_head_dim)
         self.use_checkpoint = False
         self.enable_oa = True
 
@@ -113,15 +116,32 @@ class OAFluxTransformerBlock(nn.Module):
             modulation = self.time_liner(combined_emb_flat)
             gate_msa, shift_mlp, scale_mlp, gate_mlp = modulation.chunk(4, dim=-1)
 
-            # 3. 正交注意力模块
+            # 3. 交叉注意力模块
+            hidden_states_grouped = hidden_states.view(B, 3, *hidden_states.shape[1:])
             norm_hidden_states_flat = self.norm1(hidden_states)
-            attn_output_flat = self.ortho_attn(norm_hidden_states_flat[:,:int(hidden_states.shape[1]/2), :], image_rotary_emb)
+            seq_len = hidden_states.shape[1]
+            latent_len = seq_len // 2
+            oa_input = None
+            if self.enable_ca:
+                norm_hidden_states_grouped = norm_hidden_states_flat.reshape(B, 3, seq_len, C)
 
+                attn_outputs = []
+                for i in range(3):
+                    attn_input = norm_hidden_states_grouped[:, i, :latent_len, :]
+                    attn_outputs.append(self.cross_attn(attn_input, hidden_states_grouped[:, i, latent_len:, :], image_rotary_emb))
+
+                attn_output_grouped = torch.stack(attn_outputs, dim=1)
+                oa_input = attn_output_grouped.view(B * 3, latent_len, C)
+                
+            else:
+                oa_input = norm_hidden_states_flat[:,:latent_len, :]    
+            #OA 注意力
+            attn_output_flat = self.ortho_attn(oa_input, image_rotary_emb)
             # 4. 分组并应用Attention门控
             latent_size = int(math.sqrt(hidden_states.shape[1]/2))
             
             # 正确地对hidden_states和attn_output进行分组
-            hidden_states_grouped = hidden_states.view(B, 3, *hidden_states.shape[1:])
+            
             attn_output_grouped = attn_output_flat.view(B, 3, *attn_output_flat.shape[1:])
             
             # 正确地对门控参数进行分组
@@ -160,13 +180,9 @@ class OAFluxTransformerBlock(nn.Module):
             hidden_states = hidden_states.view(B * 3, *hidden_states.shape[2:])
 
         else:
+            raise NotImplementedError
             # 原始的else逻辑保持不变
             norm_hidden_states = self.norm1(hidden_states)
-            # NOTE: The original logic here assumes time_liner output can be chunked into 2.
-            # You might need to adjust the output dimension of time_liner if enable_gate_control can be toggled.
-            # For now, assuming a different MLP or configuration for this case.
-            # A simple fix could be to have another MLP for this branch.
-            # For this example, I'll assume self.time_liner's output is C*2 in this case.
             scale,shift = self.time_liner(temb).chunk(2, dim=-1) # This might fail if time_liner output is C*4
             attn_input = norm_hidden_states[:,:int(hidden_states.shape[1]/2), :] * (1 + scale[:, None, :]) + shift[:, None, :]
             attn_output = self.ortho_attn(attn_input,image_rotary_emb)

@@ -103,81 +103,60 @@ def sanitize_gltf_single_uv(in_path: str) -> str:
         # Any parsing/saving issue -> fall back to original file
         return in_path
 
-def compute_fitting_distance(plotter, margin: float = 1.1) -> float | None:
-    bounds = plotter.bounds
-    if bounds is None:
-        return None
-    x_len = bounds[1] - bounds[0]
-    y_len = bounds[3] - bounds[2]
-    z_len = bounds[5] - bounds[4]
-    max_extent = max(x_len, y_len, z_len)
-    if max_extent <= 0:
-        return None
-    view_angle = np.deg2rad(plotter.camera.view_angle or 30.0)
-    return margin * (0.5 * max_extent) / np.sin(view_angle / 2.0)
+
 
 
 
 from vtk.util.numpy_support import vtk_to_numpy
-def render_single_view(obj_path, azimuth, elevation, roll, output_dir=None):
+def render_single_view(obj_path, azimuth, elevation, roll, output_path=None):
     t_total_start = time.time()
     t0 = time.time()
-    views = calc_angle.views_from_front_360(azimuth, elevation, roll)
     t_gen = time.time() - t0
     imgs = []
     render_time = 0.0
     post_time = 0.0
-    for view_name, (azimuth, elevation, roll) in views.items():
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"{view_name}.png")
-            #if os.path.exists(output_path):
-            #    continue
-        t_r0 = time.time()
-        plotter = pv.Plotter(off_screen=True, window_size=(256, 256), image_scale=1)
-        plotter.set_background('white')
-        obj = plotter.import_gltf(obj_path)
-        plotter.show(auto_close=False)
-        plotter.reset_camera()
-        focal_point = plotter.camera.focal_point
-        fit_distance = compute_fitting_distance(plotter)
-        if fit_distance:
-            plotter.camera.SetDistance(fit_distance)
-        plotter.camera.azimuth = float(azimuth)
-        plotter.camera.elevation = float(elevation)
-        plotter.camera.SetRoll(float(roll))
-        if fit_distance:
-            plotter.camera.SetFocalPoint(*focal_point)
-            plotter.camera.SetDistance(fit_distance)
-        plotter.render()
-        if output_dir:
-            output_path = os.path.join(output_dir, f"{view_name}.png")
-            rgb = plotter.image
-            plt.imsave(output_path, rgb)
-        else:
-            w2if = vtk.vtkWindowToImageFilter()
-            w2if.SetInput(plotter.ren_win)
-            w2if.ReadFrontBufferOff()
-            w2if.Update()
-            vtk_img = w2if.GetOutput()
-            vtk_array = vtk_img.GetPointData().GetScalars()
-            w, h = plotter.ren_win.GetSize()
-            np_img = vtk_to_numpy(vtk_array).reshape(h, w, -1)
-            np_img = np.flipud(np_img)[:, :, :3]
-            t_r1 = time.time()
-            # 后处理
-            if (h, w) != (256, 256):
-                np_img = np.asarray(Image.fromarray(np_img).resize((256, 256), Image.BILINEAR))
-            img = np_img.astype(np.float32) / 127.5 - 1.0
-            tensor_image = torch.from_numpy(img.transpose(2, 0, 1))
-            imgs.append(tensor_image[:3])
-            t_p1 = time.time()
-            render_time += (t_r1 - t_r0)
-            post_time += (t_p1 - t_r1)
-        plotter.deep_clean()
-        plotter.close()
-        del plotter, obj
-    if output_dir:
+
+        #if os.path.exists(output_path):
+        #    continue
+    t_r0 = time.time()
+    if elevation==90: elevation=89.9
+    plotter = pv.Plotter(off_screen=True, window_size=(256, 256), image_scale=1)
+    plotter.set_background('white')
+    obj = plotter.import_gltf(obj_path)
+    plotter.show(auto_close=False)
+    plotter.reset_camera()
+    focal_point = plotter.camera.focal_point
+    plotter.camera.azimuth = float(azimuth)
+    plotter.camera.elevation = float(elevation)
+    plotter.camera.SetRoll(float(roll))
+    plotter.render()
+    if output_path:
+        rgb = plotter.image
+        plt.imsave(output_path, rgb)
+    else:
+        w2if = vtk.vtkWindowToImageFilter()
+        w2if.SetInput(plotter.ren_win)
+        w2if.ReadFrontBufferOff()
+        w2if.Update()
+        vtk_img = w2if.GetOutput()
+        vtk_array = vtk_img.GetPointData().GetScalars()
+        w, h = plotter.ren_win.GetSize()
+        np_img = vtk_to_numpy(vtk_array).reshape(h, w, -1)
+        np_img = np.flipud(np_img)[:, :, :3]
+        t_r1 = time.time()
+        # 后处理
+        if (h, w) != (256, 256):
+            np_img = np.asarray(Image.fromarray(np_img).resize((256, 256), Image.BILINEAR))
+        img = np_img.astype(np.float32) / 127.5 - 1.0
+        tensor_image = torch.from_numpy(img.transpose(2, 0, 1))
+        imgs.append(tensor_image[:3])
+        t_p1 = time.time()
+        render_time += (t_r1 - t_r0)
+        post_time += (t_p1 - t_r1)
+    plotter.deep_clean()
+    plotter.close()
+    del plotter, obj
+    if output_path:
         return
     total = time.time() - t_total_start
     n = len(imgs)
@@ -200,24 +179,30 @@ def render_model(obj_path, output_dir, num_views,cover_existing=False):
 
     # 20 pairs of angles in [0, 360)
     rng = np.random.default_rng(42)
-    angle_pairs = rng.uniform(0.0, 360.0, size=(num_views, 2))
+    os.makedirs(output_dir, exist_ok=True)
+    #azimuth = np.random.randint(0,360)
+
+    # Check which views need rendering
+    view_configs = []
+    for azimuth in range(0, 360, 60):
+        for elevation in range(0, 91, 15):
+            view_configs.append((azimuth, elevation))
+
+    if not cover_existing:
+        # Filter out existing views
+        view_configs = [
+            (az, el) for (az, el) in view_configs
+            if not os.path.exists(os.path.join(output_dir, f'{az}_{el}.png'))
+        ]
+
+    # If all views exist, we can skip
+    if not view_configs:
+        return
+
+    for azimuth, elevation in view_configs:
+        render_single_view(obj_path, azimuth, elevation, 0, os.path.join(output_dir,f'{azimuth}_{elevation}.png'))
     
-    #base = (165,0,-20)
-    #base =  (75,20,0)
-    #base=(-15,0,-20)
     
-    for i in range(num_views):
-        choice =np.random.randint(0,100)
-        if choice>10:
-            azimuth = np.random.uniform(0, 360)
-            elevation = np.random.uniform(0, 360)
-            roll = np.random.uniform(0, 360)
-        else:
-            azimuth = 0
-            elevation = 0
-            roll = 0
-        
-        render_single_view(obj_path, azimuth, elevation, roll, os.path.join(output_dir, str(i)))
         
         # Render and save images for each pair and each view
     return
@@ -299,7 +284,7 @@ def set_worker_affinity(core_list):
         except Exception:
             pass
 
-TIMEOUT_SECONDS = 200  # 单个渲染进程最大允许时间
+TIMEOUT_SECONDS = 600  # 单个渲染进程最大允许时间
 MAX_ATTEMPTS = 2
 
 def run_render_tasks(tasks, num_processes, core_list, attempt):
@@ -380,21 +365,30 @@ def worker_entry(obj_path, output_dir, num_views, core=None):
 
 if __name__ == "__main__":
     from xvfbwrapper import Xvfb
-    vdisplay = Xvfb(width=1280, height=640)
+    vdisplay = Xvfb(width=600, height=600)
     vdisplay.start()
     # Load JSON list of file paths
-    with open('/home/linzhuohang/3DGen/configs/rgb_multiview.json', 'r') as f:
+    import argparse
+    parser = argparse.ArgumentParser(description="Render objects to views")
+    parser.add_argument("--cpus", type=int, default=0, help="Number of worker processes (0 = auto)")
+    args = parser.parse_args()
+    MAX_CPU = args.cpus if args.cpus>0 else multiprocessing.cpu_count()
+    with open('/home/linzhuohang/3DGen/utils/combined_300k.json', 'r') as f:
         obj_paths = json.load(f)
 
     # Prepare arguments for multiprocessing
     num_views = 1
     tasks = []
     for i,obj_path in enumerate(obj_paths):
+        # Filter out invalid types (e.g. NaNs inadvertently created during JSON generation)
+        if not isinstance(obj_path, str):
+            continue
         info_id = os.path.splitext(os.path.basename(obj_path))[0]
-        obj_path = obj_path.replace('/mnt/hdd1/caixiao/data/pv_views/','/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/')
-        obj_path += '.glb'
+        #obj_path = obj_path.replace('/mnt/hdd1/caixiao/data/pv_views/','/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/')
+        #obj_path += '.glb'
         #if info_id !='0d94fa80e87e49e2b0747d1252b9e3bd':continue
-        output_dir = os.path.join('/mnt/hdd3/linzhuohang/3DGen/rgb_multiview', info_id)
+        output_dir = os.path.join('/mnt/hdd3/linzhuohang/3DGen/regularview_300k', info_id)
+        #os.makedirs(output_dir, exist_ok=True)
         #obj_path = obj_path.replace('/mnt/hdd1/caixiao/data/pv_views/','/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/')
         #obj_path += '.glb'
         if not os.path.exists(obj_path):
@@ -404,7 +398,7 @@ if __name__ == "__main__":
         tasks.append((obj_path, output_dir, num_views))
 
     # 替换 Pool 为手工进程管理以支持严格超时
-    num_processes = min(50, len(tasks))
+    num_processes = min(MAX_CPU, len(tasks))
     try:
         available_cores = sorted(os.sched_getaffinity(0))
     except AttributeError:

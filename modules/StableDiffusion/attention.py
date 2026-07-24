@@ -50,6 +50,50 @@ def init_(tensor):
     tensor.uniform_(-std, std)
     return tensor
 
+def apply_rotary_emb(
+    x: torch.Tensor,
+    freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor]],
+    use_real: bool = True,
+    use_real_unbind_dim: int = -1,
+    sequence_dim: int = 2,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
+    to the given query or key 'x' tensors using the provided frequency tensor 'freqs_cis'. The input tensors are
+    reshaped as complex numbers, and the frequency tensor is reshaped for broadcasting compatibility. The resulting
+    tensors contain rotary embeddings and are returned as real tensors.
+
+    Args:
+        x (`torch.Tensor`):
+            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
+        freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
+    """
+    if use_real:
+        cos, sin = freqs_cis  # [S, D]
+        cos = cos[None, :,None, None, :]
+        sin = sin[None, :,None, None, :]
+
+        cos, sin = cos.to(x.device), sin.to(x.device)
+
+            # Used for flux, cogvideox, hunyuan-dit
+        x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, H, S, D//2]
+        x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(-2)
+
+        #print('x shape:', x.shape)
+        #print('x rotate shape:', x_rotated.shape)
+        #print('cos shape',cos.shape)
+        out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
+        return out
+    else:
+        # used for lumina
+        x_rotated = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
+        freqs_cis = freqs_cis.unsqueeze(2)
+        x_out = torch.view_as_real(x_rotated * freqs_cis).flatten(3)
+
+        return x_out.type_as(x)
 
 # feedforward
 class GEGLU(nn.Module):
@@ -226,22 +270,32 @@ class MemoryEfficientCrossAttention(nn.Module):
         self.to_out = nn.Sequential(nn.Linear(inner_dim, query_dim), nn.Dropout(dropout))
         self.attention_op: Optional[Any] = None
 
-    def forward(self, x, context=None, mask=None):
+    def forward(self, x, context, image_rotary_emb,mask=None):
         # x = rearrange(x, 'b (h w) c -> b h w c', h=64).contiguous()
-        q = self.to_q(x)
-        context = default(context, x)
+        
+        #context = default(context, x)
         # print(context)
         # print("shape:",context.shape)
-        k = self.to_k(context)
-        v = self.to_v(context)
+        q = self.to_q(x).unsqueeze(2)
+        k = self.to_k(context).unsqueeze(2)
+        v = self.to_v(context).unsqueeze(2)
+        
+        
+        
         # print(x.shape)
-        b, _, _ = q.shape
+        b = q.shape[0]
         # print(q.shape, k.shape, v.shape, self.heads)
 
-        q = rearrange(q, 'b l (h c) -> b l h c', h=self.heads)
-        k = rearrange(k, 'b l (h c) -> b l h c', h=self.heads)
-        v = rearrange(v, 'b l (h c) -> b l h c', h=self.heads)
-
+        q = rearrange(q, 'b l f (h c) -> b l f h c', h=self.heads)
+        k = rearrange(k, 'b l f (h c) -> b l f h c', h=self.heads)
+        v = rearrange(v, 'b l f (h c) -> b l f h c', h=self.heads)
+        q = apply_rotary_emb(q,image_rotary_emb,sequence_dim=1)
+        k = apply_rotary_emb(k,image_rotary_emb,sequence_dim=1)
+        v = apply_rotary_emb(v,image_rotary_emb,sequence_dim=1)
+        q = q.squeeze(2)
+        k = k.squeeze(2)
+        v = v.squeeze(2)
+        
 
         # ## plan1 H->head  c->D
         # pass
@@ -255,7 +309,7 @@ class MemoryEfficientCrossAttention(nn.Module):
         # actually compute the attention, what we cannot get enough of
         
         if FLASHATTEN_IS_AVAILBLE:
-            # print('flash')
+            #print('flash')
             out = flash_attn.flash_attn_func(q, k, v, dropout_p=0.0, softmax_scale=None, causal=False)
             # print(out)
 
@@ -274,50 +328,7 @@ class MemoryEfficientCrossAttention(nn.Module):
         return self.to_out(out)
 
 
-def apply_rotary_emb(
-    x: torch.Tensor,
-    freqs_cis: Union[torch.Tensor, Tuple[torch.Tensor]],
-    use_real: bool = True,
-    use_real_unbind_dim: int = -1,
-    sequence_dim: int = 2,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Apply rotary embeddings to input tensors using the given frequency tensor. This function applies rotary embeddings
-    to the given query or key 'x' tensors using the provided frequency tensor 'freqs_cis'. The input tensors are
-    reshaped as complex numbers, and the frequency tensor is reshaped for broadcasting compatibility. The resulting
-    tensors contain rotary embeddings and are returned as real tensors.
 
-    Args:
-        x (`torch.Tensor`):
-            Query or key tensor to apply rotary embeddings. [B, H, S, D] xk (torch.Tensor): Key tensor to apply
-        freqs_cis (`Tuple[torch.Tensor]`): Precomputed frequency tensor for complex exponentials. ([S, D], [S, D],)
-
-    Returns:
-        Tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
-    """
-    if use_real:
-        cos, sin = freqs_cis  # [S, D]
-        cos = cos[None, :,None, None, :]
-        sin = sin[None, :,None, None, :]
-
-        cos, sin = cos.to(x.device), sin.to(x.device)
-
-            # Used for flux, cogvideox, hunyuan-dit
-        x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, H, S, D//2]
-        x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(-2)
-
-        #print('x shape:', x.shape)
-        #print('x rotate shape:', x_rotated.shape)
-        #print('cos shape',cos.shape)
-        out = (x.float() * cos + x_rotated.float() * sin).to(x.dtype)
-        return out
-    else:
-        # used for lumina
-        x_rotated = torch.view_as_complex(x.float().reshape(*x.shape[:-1], -1, 2))
-        freqs_cis = freqs_cis.unsqueeze(2)
-        x_out = torch.view_as_real(x_rotated * freqs_cis).flatten(3)
-
-        return x_out.type_as(x)
 class MemoryEfficientCrossAttention_tri(nn.Module):
     # https://github.com/MatthieuTPHR/diffusers/blob/d80b531ff8060ec1ea982b65a1b8df70f73aa67c/src/diffusers/models/attention.py#L223
     def __init__(self, query_dim, context_dim=None, heads=8, dim_head=64, dropout=0.0):

@@ -14,7 +14,7 @@ import uuid
 from typing import Dict, List, Optional
 
 # --- 1. 全局配置 ---
-MAX_GPUS_TO_USE = 6
+MAX_GPUS_TO_USE = 4
 MODEL_PATH = "/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--black-forest-labs--FLUX.1-Kontext-dev/snapshots/af58063aa431f4d2bbc11ae46f57451d4416a170"
 LORA_PATH = '/mnt/hdd3/linzhuohang/3DGen/hf/hub/models--JD3GEN--JD3_Nudify_Kontext_LoRa/snapshots/c4206e2598d821a790081479a27b254af64e5c86'
 

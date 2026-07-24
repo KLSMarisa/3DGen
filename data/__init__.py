@@ -5,7 +5,10 @@ from typing import Iterable
 
 # from data.obj2render_dataset import Obj2Render_Dataset
 from data.text2obj_dataset import Text2ObjDataset
-
+from data.elevation_dataset import ElevationIterableDataset, ElevationInferenceDataset
+from data.rotate_dataset import RotateDataset
+from data.render_dataset import RenderDataset
+from data.pair_dataset import PairDataset
 from torch.utils.data import Dataset, IterableDataset, ChainDataset
 from torch.utils.data import DataLoader
 # import pyvista as pv
@@ -13,8 +16,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import json
 import time
+
 # pv.start_xvfb()
-from data.multiview_dataset import load_multiview_dataset 
 def load_text2obj_dataset(
     *,
     data_dir,
@@ -364,6 +367,32 @@ class ConcatDataset(IterableDataset):
         elif self.length_cut == 'min':
             total = min(lengths) * len(lengths)
         return total
+# --- 新增的安全获取嵌套配置的辅助函数 ---
+def safe_get(config, key_path: str, default=None):
+    """
+    安全地从嵌套的 config 对象（如 OmegaConf, dict, argparse）中获取值。
+    例如: safe_get(config, 'dataset.rotator_val.root', None)
+    """
+    keys = key_path.split('.')
+    curr = config
+    try:
+        for k in keys:
+            if isinstance(curr, dict) and k in curr:
+                curr = curr[k]
+            elif hasattr(curr, k):
+                curr = getattr(curr, k)
+            elif hasattr(curr, 'get'):
+                curr = curr.get(k, default)
+                if curr is default:
+                    return default
+            else:
+                return default
+        return curr if curr is not None else default
+    except Exception:
+        return default
+# ----------------------------------------
+
+# ... [保留你原有的 load_text2obj_dataset, load_text2render_dataset, load_text2scene_dataset, ConcatDataset 等函数不动] ...
 
 
 def UnifiedDataset(config):
@@ -373,9 +402,50 @@ def UnifiedDataset(config):
     assert len(datasets) > 0, "No dataset specified"
     for dataset in datasets:
         if dataset == 'text2obj':
-            _datasets.append(load_text2obj_dataset(
-                data_dir=config.dataset.text2obj.data_dir,
-                # view_num=config.dataset.text2obj.view_num
+            _datasets.append(PairDataset(
+                json_path=config.dataset.text2obj.data_dir,
+                image_size=config.image_resolution,
+                # ✅ 修改点
+                data_root=safe_get(config, 'dataset.text2obj.root', None)
+            ))
+        elif dataset == 'rotator':
+            # print(safe_get(config, 'dataset.rotator_train.root')) # 如果需要打印，也可以用 safe_get
+            _datasets.append(RotateDataset(
+                json_path=config.dataset.rotator_train.data_dir,
+                # ✅ 修改点
+                data_root=safe_get(config, 'dataset.rotator_train.root', None),
+                glb_db=config.dataset.rotator_train.glb_db,
+                glb_root=safe_get(config, 'dataset.rotator_train.glb_root', '/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/'),
+                image_size=config.image_resolution,
+                center_crop=safe_get(config, 'center_crop', False),
+                random_flip=safe_get(config, 'random_flip', False),
+                is_train=True,
+                val_views_per_obj=7,   # 训练无效，但传了也没事
+            ))
+        elif dataset == 'elevation':
+            processor = config.dataset.elavation_train.processor
+            if processor == 'ElevationIterableDataset':
+                _datasets.append(ElevationIterableDataset(
+                    json_path=config.dataset.elavation_train.data_dir,
+                    image_size=config.image_resolution,
+                    # ✅ 修改点
+                    data_root=safe_get(config, 'dataset.elavation_train.root', None),
+                    center_crop=safe_get(config, 'center_crop', False),
+                    random_flip=safe_get(config, 'random_flip', True),
+                    is_train=True,
+                ))
+            else:
+                _datasets.append(PairDataset(
+                    json_path=config.dataset.elavation_train.data_dir,
+                    image_size=config.image_resolution,
+                    # ✅ 修改点
+                    data_root=safe_get(config, 'dataset.elavation_train.root', None),
+                ))
+        elif dataset == 'render_sparse':
+            _datasets.append(RenderDataset(
+                json_path=config.dataset.render_sparse.data_dir,
+                data_root=safe_get(config, 'dataset.render_sparse.root', None),
+                image_size=config.image_resolution,
             ))
         elif dataset == 'text2scene':
             _datasets.append(load_text2scene_dataset(
@@ -385,20 +455,14 @@ def UnifiedDataset(config):
         elif dataset == 'obj2render':
             _datasets.append(load_obj2render_dataset(
                 data_dir=config.dataset.obj2render.data_dir,
-                # view_num=config.dataset.text2obj.view_num
             ))
         elif dataset == 'text2render':
             _datasets.append(load_text2render_dataset(
                 data_dir=config.dataset.text2render.data_dir,
-                # view_num=config.dataset.text2obj.view_num
             ))
         else:
-            '''
-            TODO
-            '''
             raise NotImplementedError
 
-    # return ChainDataset(_datasets)
     return ConcatDataset(_datasets)
 
 
@@ -412,12 +476,46 @@ def Unified_val_Dataset(config):
             if 'gso' in config.dataset.text2obj_val.data_dir:
                 _datasets.append(load_multiview_dataset(
                     data_dir=config.dataset.text2obj_val.data_dir,
-                    # view_num=config.dataset.text2obj.view_num
                 ))
             else:
-                _datasets.append(load_text2obj_dataset(
-                    data_dir=config.dataset.text2obj_val.data_dir,
-                    # view_num=config.dataset.text2obj.view_num
+                _datasets.append(PairDataset(
+                json_path=config.dataset.text2obj.data_dir,
+                image_size=config.image_resolution,
+                # ✅ 修改点
+                data_root=safe_get(config, 'dataset.text2obj.root', None)
+                ))
+        elif dataset == 'rotator':
+            _datasets.append(RotateDataset(
+                json_path=config.dataset.rotator_val.data_dir,
+                # ✅ 修改点
+                data_root=safe_get(config, 'dataset.rotator_val.root', None),
+                glb_db=config.dataset.rotator_val.glb_db,
+                glb_root=safe_get(config, 'dataset.rotator_val.glb_root', '/mnt/hdd1/caixiao/data/objaverse_1.0/hf-objaverse-v1/glbs/'),
+                image_size=config.image_resolution,
+                center_crop=safe_get(config, 'center_crop', False),
+                random_flip=False,
+                is_train=False,
+                val_views_per_obj=10,
+            ))
+        elif dataset == 'elevation':
+            processor = config.dataset.elavation_val.processor
+            if processor == 'ElevationIterableDataset':
+                _datasets.append(ElevationIterableDataset(
+                    json_path=config.dataset.elavation_val.data_dir,
+                    image_size=config.image_resolution,
+                    # ✅ 修改点
+                    data_root=safe_get(config, 'dataset.elavation_val.root', None),
+                    center_crop=safe_get(config, 'center_crop', False),
+                    random_flip=False,
+                    is_train=False,
+                    yaw_eval=0,
+                ))
+            else:
+                _datasets.append(PairDataset(
+                    json_path=config.dataset.elavation_val.data_dir,
+                    image_size=config.image_resolution,
+                    # ✅ 修改点
+                    data_root=safe_get(config, 'dataset.elavation_val.root', None),
                 ))
         elif dataset == 'text2scene':
             _datasets.append(load_text2scene_dataset(
@@ -427,15 +525,10 @@ def Unified_val_Dataset(config):
         elif dataset == 'obj2render':
             _datasets.append(load_val_obj2render_dataset(
                 data_dir=config.dataset.obj2render.data_dir,
-                # view_num=config.dataset.text2obj.view_num
             ))
         else:
-            '''
-            TODO
-            '''
             raise NotImplementedError
 
-    # return ChainDataset(_datasets)
     return ConcatDataset(_datasets)
 
 def identity_collate_fn(x):
@@ -450,10 +543,10 @@ def create_dataloader(config):
         batch_size       =   config.batch_size,
         shuffle          =   False,
         num_workers      =   10,
-        collate_fn       =   None,
+        collate_fn       =   (lambda x: x) if config.no_data_stack else None,
         pin_memory       =   False,
-        prefetch_factor  = 10,
-        timeout=0,
+        prefetch_factor  = 20,
+        drop_last=True,
     )
     return dataloader
 
@@ -463,12 +556,35 @@ def create_val_dataloader(config):
     dataset = Unified_val_Dataset(config)
     dataloader = DataLoader(
         dataset          =   dataset,
-        batch_size       =   config.batch_size,
+        batch_size       =   1,
         shuffle          =   False,
         num_workers      =   10,
-        collate_fn       =   None,
+        collate_fn       =   (lambda x: x) if config.no_data_stack else None,
         pin_memory       =   False,
-        timeout=10,
+        drop_last=True,
+    )
+    return dataloader
+
+
+def create_elevation_inference_dataloader(config):
+    """elevation 推理专用 dataloader：从文件夹直接加载图片，无需 JSONL 列表"""
+    elev_cfg = config.dataset.elevation
+    image_dir = str(elev_cfg.inference_image_dir)
+
+    dataset = ElevationInferenceDataset(
+        image_dir=image_dir,
+        image_size=config.image_resolution,
+        center_crop=getattr(config, "center_crop", False),
+    )
+
+    dataloader = DataLoader(
+        dataset=dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=4,
+        collate_fn=None,
+        pin_memory=False,
+        drop_last=False,
     )
     return dataloader
 

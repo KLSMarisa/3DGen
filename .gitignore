@@ -110,6 +110,18 @@ ENV/
 env.bak/
 venv.bak/
 
+# Project-generated experiment artifacts
+/tmp/
+/train_outputs/
+/outputs/
+/logs/
+/nohup.out
+/modules/threestudio/outputs/
+/modules/threestudio/outputs-gradio/
+/modules/threestudio/output/
+/modules/threestudio/tiny-cuda-nn/
+/modules/threestudio/tiny-cuda-nn.tar.gz
+
 # Spyder project settings
 .spyderproject
 .spyproject

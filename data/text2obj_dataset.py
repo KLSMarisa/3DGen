@@ -124,13 +124,14 @@ def read_obj(obj_path):
         necessary_lists = ['front.png', 'up.png', 'right.png','front.png' ]
     else:
         parts = obj_path.split('/')
-        last_two_parts = '/'.join(parts[-2:])
+        #last_two_parts = '/'.join(parts[-2:])
         img_dir = os.path.join(obj_path,'rgb')
-
+        input_id = random.randint(0, 63)
+        input_id2 = random.randint(0, 63)
+        necessary_lists = [f'rgb_{input_id2}.png', 'rgb_63.png', 'rgb_4.png',f'rgb_{input_id}.png' ]
         # print(img_dir)
         # random_select = random.sample(img_lists, 3)
-        input_id = random.randint(0, 63)
-        necessary_lists = ['rgb_0.png', 'rgb_63.png', 'rgb_4.png',f'rgb_{input_id}.png' ]
+        
     # idx1 = random.randint(0, 63)
     # idx2 = random.randint(0, 63)
     # idx3 = random.randint(0, 63)
@@ -295,7 +296,7 @@ class Text2ObjDataset(IterableDataset):
 
 
                 idx = (idx + num_workers) % self.size
-
+                #print('yield ' ,img_info)
                 yield img_info
 
             except Exception as e:
